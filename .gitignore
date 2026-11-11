@@ -1,0 +1,19 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Visual Studio / MSBuild / NuGet (WinAppSDK)
+.vs/
+*.user
+*.suo
+bin/
+obj/
+packages/
+*.nupkg
+
+# Generated WinUI bindings (cargo xtask gen-bindings)
+/crates/winuake/src/bindings/
+
+# Coverage
+*.profraw
+lcov.info
