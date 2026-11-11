@@ -69,6 +69,19 @@ pub fn install(show_icon: bool) -> Result<()> {
     Ok(())
 }
 
+/// Shows or hides the notification-area icon (the `ShowSystrayIcon` setting).
+pub fn set_icon_visible(visible: bool) {
+    if ICON_SHOWN.with(Cell::get) == visible {
+        return;
+    }
+    ICON_SHOWN.with(|slot| slot.set(visible));
+    if visible {
+        add_icon();
+    } else {
+        delete_icon();
+    }
+}
+
 /// Removes the icon and the window. Call when the app is exiting, or Explorer keeps a ghost icon until the pointer passes over it.
 pub fn remove() {
     delete_icon();

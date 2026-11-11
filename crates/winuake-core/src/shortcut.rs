@@ -34,6 +34,14 @@ pub struct Chord {
     pub key: ChordKey,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HotkeySpec {
+    pub control: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub virtual_key: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChordParseError {
     pub chord: String,
@@ -88,6 +96,29 @@ impl Chord {
             _ => (key, modifiers),
         };
         Some(Self { modifiers, key })
+    }
+
+    /// The physical key and modifiers to register for this chord as a global hotkey. `(`, `)` and `*` need Shift on a US layout.
+    pub fn hotkey(&self) -> HotkeySpec {
+        let (virtual_key, needs_shift) = match self.key {
+            ChordKey::Tab => (VK_TAB, false),
+            ChordKey::Left => (VK_LEFT, false),
+            ChordKey::Right => (VK_RIGHT, false),
+            ChordKey::Up => (VK_UP, false),
+            ChordKey::Down => (VK_DOWN, false),
+            ChordKey::Letter(letter) => (letter as i32, false),
+            ChordKey::Digit(digit) => (VK_DIGIT_0 + i32::from(digit), false),
+            ChordKey::Function(number) => (VK_F1 + i32::from(number) - 1, false),
+            ChordKey::ParenLeft => (VK_DIGIT_0 + 9, true),
+            ChordKey::ParenRight => (VK_DIGIT_0, true),
+            ChordKey::Asterisk => (VK_DIGIT_0 + 8, true),
+        };
+        HotkeySpec {
+            control: self.modifiers.control,
+            shift: self.modifiers.shift || needs_shift,
+            alt: self.modifiers.alt,
+            virtual_key,
+        }
     }
 
     /// Parses `Ctrl+Shift+T`, `Alt+1`, `F12`, `Ctrl+Tab`, `Ctrl+(`. Modifier and key names are case-insensitive.
@@ -235,5 +266,22 @@ mod tests {
     fn given_keys_no_chord_uses_when_converting_then_none() {
         assert_eq!(Chord::from_virtual_key(0x1B, CTRL), None);
         assert_eq!(Chord::from_virtual_key(0x0D, CTRL), None);
+    }
+
+    #[test]
+    fn given_chords_when_asking_for_a_hotkey_then_the_virtual_key_and_modifiers_come_back() {
+        let spec = Chord::parse("Ctrl+Alt+Q").unwrap().hotkey();
+        assert_eq!(spec, HotkeySpec { control: true, shift: false, alt: true, virtual_key: 0x51 });
+        assert_eq!(Chord::parse("F12").unwrap().hotkey().virtual_key, 0x7B);
+        assert_eq!(Chord::parse("Alt+1").unwrap().hotkey().virtual_key, 0x31);
+        assert_eq!(Chord::parse("Ctrl+Tab").unwrap().hotkey().virtual_key, 0x09);
+        assert_eq!(Chord::parse("Ctrl+Left").unwrap().hotkey().virtual_key, 0x25);
+        assert_eq!(Chord::parse("Ctrl+Right").unwrap().hotkey().virtual_key, 0x27);
+        assert_eq!(Chord::parse("Ctrl+Up").unwrap().hotkey().virtual_key, 0x26);
+        assert_eq!(Chord::parse("Ctrl+Down").unwrap().hotkey().virtual_key, 0x28);
+        let paren = Chord::parse("Ctrl+(").unwrap().hotkey();
+        assert!(paren.shift && paren.virtual_key == 0x39);
+        assert!(Chord::parse("Ctrl+)").unwrap().hotkey().shift);
+        assert!(Chord::parse("Ctrl+*").unwrap().hotkey().shift);
     }
 }

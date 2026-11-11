@@ -13,7 +13,6 @@ use crate::window_native::IWindowNative;
 use crate::workspace_host::WorkspaceHost;
 use std::cell::RefCell;
 use windows_core::{Array, HSTRING, Interface, Ref, Result, implement};
-use winuake_config::window::WindowSettings;
 use winuake_core::sessions::session::SessionKind;
 
 thread_local! {
@@ -75,6 +74,7 @@ pub fn run() -> Result<()> {
 /// Ends the application: drops the window and terminal (which kills the shell) and leaves the XAML message loop.
 pub fn quit() {
     tracing::info!("quitting");
+    crate::settings_store::stop_watching();
     crate::workspace_host::shutdown();
     MAIN_WINDOW.with(|slot| drop(slot.borrow_mut().take()));
     if let Err(error) = Application::Current().and_then(|application| application.Exit()) {
@@ -91,15 +91,21 @@ fn open_main_window() -> Result<()> {
     let window = Window::new()?;
     window.SetTitle(&HSTRING::from("Winuake"))?;
 
+    let settings = crate::settings_store::initialize();
     let window_handle = window.cast::<IWindowNative>()?.handle()?;
-    let workspace = WorkspaceHost::install(window_handle)?;
+    let workspace = WorkspaceHost::install(window_handle, &settings)?;
     window.SetContent(&workspace.root())?;
     workspace.add_session(SessionKind::Single);
 
-    let settings = window_settings();
-    let open_after_start = settings.open_after_start;
-    crate::tray::install(settings.show_tray_icon)?;
-    let host = DropDownHost::install(window_handle, settings, Box::new(crate::workspace_host::focus_active_terminal))?;
+    let open_after_start = settings.window.open_after_start;
+    crate::tray::install(settings.window.show_tray_icon)?;
+    let host = DropDownHost::install(
+        window_handle,
+        settings.window.clone(),
+        settings.toggle_hotkey.as_deref(),
+        Box::new(crate::workspace_host::focus_active_terminal),
+    )?;
+    crate::settings_store::start_watching();
 
     // Show once, off screen, so XAML lays the terminal out at its real size; then hide until the first toggle.
     host.park_for_first_layout();
@@ -111,14 +117,4 @@ fn open_main_window() -> Result<()> {
 
     MAIN_WINDOW.with(|slot| *slot.borrow_mut() = Some(window));
     Ok(())
-}
-
-/// Defaults, plus `WINUAKE_WINDOW_SETTINGS` overrides (for example `frames=50+keep_open=false`) until the settings file exists.
-fn window_settings() -> WindowSettings {
-    let Some(overrides) = std::env::var_os("WINUAKE_WINDOW_SETTINGS") else { return WindowSettings::default() };
-    let (settings, problems) = WindowSettings::default().with_overrides(&overrides.to_string_lossy());
-    for problem in problems {
-        tracing::warn!(%problem, "ignored a window setting override");
-    }
-    settings
 }

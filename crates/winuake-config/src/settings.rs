@@ -148,6 +148,8 @@ pub struct SettingsProblem {
 pub struct LoadedSettings {
     pub settings: Settings,
     pub problems: Vec<SettingsProblem>,
+    /// The text was not valid TOML, so `settings` is just the defaults. A running app should keep what it has instead.
+    pub unreadable: bool,
 }
 
 // ---- on-disk groups ----
@@ -264,7 +266,7 @@ impl Settings {
             Err(error) => {
                 let message = format!("not valid TOML, using defaults: {}", error.message());
                 problems.push(SettingsProblem { group: String::new(), message });
-                return LoadedSettings { settings: Settings::default(), problems };
+                return LoadedSettings { settings: Settings::default(), problems, unreadable: true };
             }
         };
 
@@ -325,7 +327,7 @@ impl Settings {
             profiles,
             default_profile,
         };
-        LoadedSettings { settings, problems }
+        LoadedSettings { settings, problems, unreadable: false }
     }
 
     /// Serializes to TOML in the same shape `parse` reads.
@@ -501,6 +503,8 @@ mod tests {
         assert_eq!(loaded.settings, Settings::default());
         assert_eq!(loaded.problems.len(), 1);
         assert_eq!(loaded.problems[0].group, "");
+        assert!(loaded.unreadable);
+        assert!(!Settings::parse("").unreadable);
     }
 
     #[test]

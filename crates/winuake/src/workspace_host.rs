@@ -15,6 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use windows_core::{HSTRING, Interface, Result};
+use winuake_config::settings::Settings;
 use winuake_core::actions::{Action, ShortcutMap};
 use winuake_core::drop_down::{DropDownEvent, PercentStep};
 use winuake_core::ids::{SessionId, TerminalId};
@@ -64,7 +65,7 @@ struct DividerView {
 
 pub struct WorkspaceHost {
     workspace: RefCell<Workspace>,
-    shortcuts: ShortcutMap,
+    shortcuts: RefCell<ShortcutMap>,
     window_handle: isize,
     content: ContentControl,
     sessions: RefCell<HashMap<SessionId, SessionView>>,
@@ -75,12 +76,12 @@ pub struct WorkspaceHost {
 
 impl WorkspaceHost {
     /// Creates the host on the UI thread and registers it for event callbacks.
-    pub fn install(window_handle: isize) -> Result<Rc<Self>> {
+    pub fn install(window_handle: isize, settings: &Settings) -> Result<Rc<Self>> {
         let chrome = Chrome::create()?;
         let content = chrome.content();
         let host = Rc::new(Self {
-            workspace: RefCell::new(Workspace::new(WorkspaceSettings::default())),
-            shortcuts: ShortcutMap::with_defaults(),
+            workspace: RefCell::new(Workspace::new(workspace_settings(settings))),
+            shortcuts: RefCell::new(shortcut_map(settings)),
             window_handle,
             content,
             sessions: RefCell::new(HashMap::new()),
@@ -95,6 +96,7 @@ impl WorkspaceHost {
             }
         })?);
         host.chrome.connect(&host)?;
+        host.chrome.apply_bar_visibility(&settings.window);
         Ok(host)
     }
 
@@ -422,6 +424,31 @@ impl WorkspaceHost {
 
 // ---- free functions the views and chrome call (all on the UI thread) ----
 
+fn workspace_settings(settings: &Settings) -> WorkspaceSettings {
+    WorkspaceSettings {
+        dynamic_tab_titles: settings.window.dynamic_tab_titles,
+        keep_open_after_last_session_closes: settings.window.keep_open_after_last_session_closes,
+        confirm_quit: settings.dialogs.confirm_quit,
+    }
+}
+
+fn shortcut_map(settings: &Settings) -> ShortcutMap {
+    let outcome = ShortcutMap::with_overrides(&settings.shortcuts);
+    for problem in outcome.problems {
+        tracing::warn!(%problem, "ignored a shortcut override");
+    }
+    outcome.map
+}
+
+/// New settings arrived: update the workspace behavior, shortcut table and chrome.
+pub fn apply_settings(settings: &Settings) {
+    let Some(host) = host() else { return };
+    let effects = host.workspace.borrow_mut().apply_settings(workspace_settings(settings));
+    host.apply(effects);
+    *host.shortcuts.borrow_mut() = shortcut_map(settings);
+    host.chrome.apply_bar_visibility(&settings.window);
+}
+
 pub fn run_action(action: Action) {
     if let Some(host) = host() {
         host.run_action(action);
@@ -548,7 +575,7 @@ pub fn handle_shortcut(virtual_key: i32, modifiers: Modifiers) -> bool {
     let Some(host) = host() else { return false };
     let chord_modifiers = ChordModifiers { control: modifiers.control, shift: modifiers.shift, alt: modifiers.alt };
     let Some(chord) = Chord::from_virtual_key(virtual_key, chord_modifiers) else { return false };
-    let Some(action) = host.shortcuts.lookup(chord) else { return false };
+    let Some(action) = host.shortcuts.borrow().lookup(chord) else { return false };
     host.run_action(action);
     true
 }

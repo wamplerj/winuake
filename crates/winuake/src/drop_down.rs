@@ -8,10 +8,10 @@ use crate::window_bindings::{
     DWMWCP_DONOTROUND, DwmSetWindowAttribute, EnumDisplayMonitors, GWL_EXSTYLE, GWL_STYLE, GetCurrentProcessId,
     GetCurrentThreadId, GetCursorPos, GetForegroundWindow, GetMonitorInfoW, GetWindowLongPtrW,
     GetWindowThreadProcessId, HDC, HMONITOR, HWND, HWND_NOTOPMOST, HWND_TOPMOST, IVirtualDesktopManager, KillTimer,
-    LPARAM, MOD_NOREPEAT, MONITORINFO, POINT, RECT, RegisterHotKey, SW_HIDE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-    SetWindowPos, SetWindowRgn, ShowWindow, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
-    WS_POPUP,
+    LPARAM, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MONITORINFO, POINT, RECT, RegisterHotKey, SW_HIDE,
+    SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowRgn, ShowWindow, UnregisterHotKey, WS_CLIPCHILDREN,
+    WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -27,8 +27,6 @@ const TOGGLE_HOTKEY_ID: i32 = 1;
 const VK_F12: u32 = 0x7B;
 const VK_OEM_3: u32 = 0xC0;
 const MOD_WIN: u32 = 0x0008;
-const MOD_CONTROL: u32 = 0x0002;
-const MOD_ALT: u32 = 0x0001;
 const FOCUS_POLL_INTERVAL_MS: u32 = 100;
 const CLSCTX_ALL: u32 = 0x17;
 const MONITORINFOF_PRIMARY: u32 = 1;
@@ -42,8 +40,8 @@ struct HotkeyCandidate {
 const TOGGLE_HOTKEY_CANDIDATES: [HotkeyCandidate; 4] = [
     HotkeyCandidate { name: "F12", modifiers: 0, virtual_key: VK_F12 },
     HotkeyCandidate { name: "Win+`", modifiers: MOD_WIN, virtual_key: VK_OEM_3 },
-    HotkeyCandidate { name: "Ctrl+`", modifiers: MOD_CONTROL, virtual_key: VK_OEM_3 },
-    HotkeyCandidate { name: "Ctrl+Alt+`", modifiers: MOD_CONTROL | MOD_ALT, virtual_key: VK_OEM_3 },
+    HotkeyCandidate { name: "Ctrl+`", modifiers: MOD_CONTROL as u32, virtual_key: VK_OEM_3 },
+    HotkeyCandidate { name: "Ctrl+Alt+`", modifiers: (MOD_CONTROL | MOD_ALT) as u32, virtual_key: VK_OEM_3 },
 ];
 
 /// CLSID_VirtualDesktopManager.
@@ -70,11 +68,17 @@ pub struct DropDownHost {
     animation_started: Cell<Option<Instant>>,
     focus_timer: Cell<usize>,
     last_focus_state: Cell<Option<(bool, bool)>>,
+    toggle_hotkey: RefCell<Option<String>>,
 }
 
 impl DropDownHost {
     /// Takes over `window_handle`: restyles it, parks it hidden, registers the global hotkey, and installs the host on this thread.
-    pub fn install(window_handle: isize, settings: WindowSettings, focus_terminal: Box<dyn Fn()>) -> Result<Rc<Self>> {
+    pub fn install(
+        window_handle: isize,
+        settings: WindowSettings,
+        toggle_hotkey: Option<&str>,
+        focus_terminal: Box<dyn Fn()>,
+    ) -> Result<Rc<Self>> {
         let window = HWND(window_handle as *mut core::ffi::c_void);
         let desktop_manager = unsafe {
             CoCreateInstance::<_, IVirtualDesktopManager>(&VIRTUAL_DESKTOP_MANAGER, None::<&IUnknown>, CLSCTX_ALL)
@@ -90,16 +94,50 @@ impl DropDownHost {
             animation_started: Cell::new(None),
             focus_timer: Cell::new(0),
             last_focus_state: Cell::new(None),
+            toggle_hotkey: RefCell::new(toggle_hotkey.map(str::to_owned)),
         });
         host.apply_popup_style();
         HOST.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&host)));
 
-        host.register_toggle_hotkey();
+        host.register_toggle_hotkey(toggle_hotkey);
         Ok(host)
     }
 
-    /// Yakuake's default is F12, but Windows reserves it for debuggers and may refuse it, so fall back to Win+` (Windows Terminal's quake key).
-    fn register_toggle_hotkey(&self) {
+    /// Registers the global toggle hotkey: the configured one if it works, else Yakuake's default F12, which Windows reserves for
+    /// debuggers and may refuse, so then Win+` (Windows Terminal's quake key) and two more.
+    fn register_toggle_hotkey(&self, configured: Option<&str>) {
+        unsafe {
+            let _ = UnregisterHotKey(None, TOGGLE_HOTKEY_ID);
+        }
+        if let Some(text) = configured {
+            match winuake_core::shortcut::Chord::parse(text) {
+                Ok(chord) => {
+                    let spec = chord.hotkey();
+                    let mut modifiers: u32 = 0;
+                    if spec.control {
+                        modifiers |= MOD_CONTROL as u32;
+                    }
+                    if spec.shift {
+                        modifiers |= MOD_SHIFT as u32;
+                    }
+                    if spec.alt {
+                        modifiers |= MOD_ALT as u32;
+                    }
+                    if unsafe {
+                        RegisterHotKey(None, TOGGLE_HOTKEY_ID, modifiers | MOD_NOREPEAT as u32, spec.virtual_key as u32)
+                    }
+                    .as_bool()
+                    {
+                        tracing::info!(hotkey = text, "registered configured toggle hotkey");
+                        return;
+                    }
+                    tracing::warn!(hotkey = text, error = %windows_core::Error::from_thread(), "could not register the configured hotkey; trying the defaults");
+                }
+                Err(error) => {
+                    tracing::warn!(hotkey = text, %error, "configured hotkey is not a valid chord; trying the defaults")
+                }
+            }
+        }
         for candidate in TOGGLE_HOTKEY_CANDIDATES {
             if unsafe {
                 RegisterHotKey(None, TOGGLE_HOTKEY_ID, candidate.modifiers | MOD_NOREPEAT as u32, candidate.virtual_key)
@@ -197,13 +235,7 @@ impl DropDownHost {
                 self.focus_timer.set(unsafe { SetTimer(None, 0, FOCUS_POLL_INTERVAL_MS, Some(focus_timer_proc)) });
             }
             DropDownCommand::StopFocusWatch => self.stop_timer(&self.focus_timer),
-            DropDownCommand::PersistSettings(settings) => {
-                tracing::info!(
-                    width = settings.width_percent,
-                    height = settings.height_percent,
-                    "window settings changed (not saved until Phase 5)"
-                );
-            }
+            DropDownCommand::PersistSettings(settings) => crate::settings_store::persist_window(&settings),
         }
     }
 
@@ -419,11 +451,18 @@ pub fn keep_open() -> bool {
     keep_open
 }
 
-/// The `keep-open` action: flips the setting (live only until the settings file exists in Phase 5).
+/// The `keep-open` action: flips the setting and saves it.
 pub fn toggle_keep_open() {
+    crate::settings_store::update(|settings| settings.window.keep_open = !settings.window.keep_open);
+}
+
+/// New settings arrived (file edit or settings window): update the controller and the hotkey if it changed.
+pub fn apply_settings(settings: &winuake_config::settings::Settings) {
     with_host(|host| {
-        let mut settings = host.controller.borrow().settings().clone();
-        settings.keep_open = !settings.keep_open;
-        host.dispatch(DropDownEvent::SettingsChanged(settings));
+        host.dispatch(DropDownEvent::SettingsChanged(settings.window.clone()));
+        if host.toggle_hotkey.borrow().as_deref() != settings.toggle_hotkey.as_deref() {
+            *host.toggle_hotkey.borrow_mut() = settings.toggle_hotkey.clone();
+            host.register_toggle_hotkey(settings.toggle_hotkey.as_deref());
+        }
     });
 }

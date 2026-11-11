@@ -58,7 +58,7 @@ pub struct Chrome {
     root: Grid,
     content: ContentControl,
     title_bar: UIElement,
-    title_bar_hidden: Cell<bool>,
+    tab_bar: UIElement,
     title_text: TextBlock,
     keep_open_button: TextBlock,
     tab_strip: Panel,
@@ -109,7 +109,7 @@ impl Chrome {
             root: root_element.cast()?,
             content: find(&root_element, "ContentHost")?,
             title_bar: find(&root_element, "TitleBar")?,
-            title_bar_hidden: Cell::new(false),
+            tab_bar: find(&root_element, "TabBar")?,
             title_text: find(&root_element, "TitleText")?,
             keep_open_button: find(&root_element, "KeepOpenButton")?,
             tab_strip: find(&root_element, "TabStrip")?,
@@ -156,7 +156,6 @@ impl Chrome {
             }
             workspace_host::run_action(Action::NewSession);
         })?);
-        self.update_keep_open_indicator();
         Ok(())
     }
 
@@ -168,22 +167,24 @@ impl Chrome {
 
     pub fn toggle_keep_open(&self) {
         crate::drop_down::toggle_keep_open();
-        self.update_keep_open_indicator();
     }
 
-    /// A filled pin while the window stays open on focus loss, an outline pin otherwise.
-    fn update_keep_open_indicator(&self) {
-        let glyph = if crate::drop_down::keep_open() { "\u{E840}" } else { "\u{E718}" };
-        let _ = self.keep_open_button.SetText(&HSTRING::from(glyph));
-    }
-
+    /// `toggle-titlebar`: flips `ShowTitleBar` and saves it.
     pub fn toggle_title_bar(&self) {
-        let visible = !self.title_bar_hidden.get();
-        let next = if visible { Visibility::Collapsed } else { Visibility::Visible };
-        match self.title_bar.SetVisibility(next) {
-            Ok(()) => self.title_bar_hidden.set(visible),
-            Err(error) => tracing::warn!(%error, "could not toggle the title bar"),
+        crate::settings_store::update(|settings| settings.window.show_title_bar = !settings.window.show_title_bar);
+    }
+
+    /// Shows or hides the title bar and tab bar and refreshes the keep-open pin.
+    pub fn apply_bar_visibility(&self, window: &winuake_config::window::WindowSettings) {
+        let visibility = |shown: bool| if shown { Visibility::Visible } else { Visibility::Collapsed };
+        if let Err(error) = self.title_bar.SetVisibility(visibility(window.show_title_bar)) {
+            tracing::warn!(%error, "could not change the title bar visibility");
         }
+        if let Err(error) = self.tab_bar.SetVisibility(visibility(window.show_tab_bar)) {
+            tracing::warn!(%error, "could not change the tab bar visibility");
+        }
+        let glyph = if window.keep_open { "\u{E840}" } else { "\u{E718}" };
+        let _ = self.keep_open_button.SetText(&HSTRING::from(glyph));
     }
 
     /// Rebuilds the tab strip from the workspace.

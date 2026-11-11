@@ -22,6 +22,8 @@ mod drop_down;
 #[cfg(windows)]
 mod message_hook;
 #[cfg(windows)]
+mod settings_store;
+#[cfg(windows)]
 mod single_instance;
 #[cfg(windows)]
 mod swap_chain_panel_native;

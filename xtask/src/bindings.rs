@@ -186,6 +186,9 @@ const RENDER_FILTERS: &[&str] = &[
 
 /// Win32 window management used by the drop-down host in `winuake`.
 const WINDOW_FILTERS: &[&str] = &[
+    "MOD_ALT",
+    "MOD_CONTROL",
+    "MOD_SHIFT",
     "MF_CHECKED",
     "MF_GRAYED",
     "GetTickCount64",
