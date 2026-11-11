@@ -1,9 +1,20 @@
 //! Winuake: drop-down terminal for Windows 11 (WinUI 3). Port of KDE Yakuake.
 
 #[cfg(windows)]
-fn main() {
-    // Phase 0 spike goes here: WinAppSDK bootstrap + WinUI 3 window.
-    println!("winuake: spike not implemented yet");
+#[allow(warnings, clippy::all)]
+mod bindings;
+#[cfg(windows)]
+mod bootstrap;
+#[cfg(windows)]
+#[allow(warnings, clippy::all)]
+mod composition;
+#[cfg(windows)]
+mod spike;
+
+#[cfg(windows)]
+fn main() -> windows_core::Result<()> {
+    let _runtime = bootstrap::WindowsAppRuntime::initialize()?;
+    spike::run()
 }
 
 #[cfg(not(windows))]

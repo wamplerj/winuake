@@ -1,21 +1,32 @@
 //! Dev tasks: `cargo xtask <task>`.
 
+mod bindings;
+mod winappsdk;
+
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match std::env::args().nth(1).as_deref() {
-        Some("gen-bindings") => {
-            not_implemented("gen-bindings: generate WinUI 3 bindings from WinAppSDK .winmd (Phase 0 spike)")
+    let workspace_root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().expect("xtask lives in workspace").to_path_buf();
+    let result = match std::env::args().nth(1).as_deref() {
+        Some("gen-bindings") => bindings::generate(&workspace_root),
+        Some("fetch-runtime") => {
+            winappsdk::ensure_package(&workspace_root, winappsdk::PACKAGE_RUNTIME).map(|directory| {
+                println!("{}", directory.join("tools").join("MSIX").join("win10-x64").display());
+            })
         }
-        Some("upstream-diff") => not_implemented("upstream-diff: list Yakuake commits since UPSTREAM.md SHA"),
+        Some("upstream-diff") => Err("upstream-diff: not implemented yet".into()),
         _ => {
-            eprintln!("usage: cargo xtask <gen-bindings|upstream-diff>");
-            ExitCode::from(2)
+            eprintln!("usage: cargo xtask <gen-bindings|fetch-runtime|upstream-diff>");
+            return ExitCode::from(2);
+        }
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
         }
     }
-}
-
-fn not_implemented(task: &str) -> ExitCode {
-    eprintln!("not implemented yet: {task}");
-    ExitCode::FAILURE
 }

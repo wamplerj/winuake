@@ -7,6 +7,7 @@ Status: Phase 0 (scaffold). See `docs/plans/winuake-port.md` for the phased plan
 ## Build
 
 ```
+cargo xtask gen-bindings   # Windows only: fetch Windows App SDK + generate WinUI bindings
 cargo build --workspace
 cargo test --workspace
 cargo xtask upstream-diff

@@ -12,7 +12,8 @@ packages/
 *.nupkg
 
 # Generated WinUI bindings (cargo xtask gen-bindings)
-/crates/winuake/src/bindings/
+/crates/winuake/src/bindings.rs
+/crates/winuake/src/composition.rs
 
 # Coverage
 *.profraw

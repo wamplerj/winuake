@@ -15,4 +15,7 @@ winuake-skin = { path = "../winuake-skin" }
 winuake-ipc = { path = "../winuake-ipc" }
 
 [target.'cfg(windows)'.dependencies]
+windows-collections = "0.100.0"
+windows-core = "0.100.0"
+windows-link = "0.100.0"
 winuake-render = { path = "../winuake-render" }

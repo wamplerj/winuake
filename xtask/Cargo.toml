@@ -7,3 +7,8 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+ureq = "3.5.1"
+windows-bindgen = "0.100.0"
+zip = "9.5.1"
