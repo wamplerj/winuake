@@ -87,6 +87,30 @@ const GRAPHICS_FILTERS: &[&str] = &[
     "DXGI_FORMAT_B8G8R8A8_UNORM",
 ];
 
+/// Win32 APIs used by the ConPTY backend in `winuake-term`.
+const CONPTY_FILTERS: &[&str] = &[
+    "CreatePipe",
+    "CreatePseudoConsole",
+    "ResizePseudoConsole",
+    "ClosePseudoConsole",
+    "InitializeProcThreadAttributeList",
+    "UpdateProcThreadAttribute",
+    "DeleteProcThreadAttributeList",
+    "CreateProcessW",
+    "WaitForSingleObject",
+    "GetExitCodeProcess",
+    "TerminateProcess",
+    "CloseHandle",
+    "STARTUPINFOEXW",
+    "PROCESS_INFORMATION",
+    "COORD",
+    "HPCON",
+    "EXTENDED_STARTUPINFO_PRESENT",
+    "CREATE_UNICODE_ENVIRONMENT",
+    "PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE",
+    "INFINITE",
+];
+
 const COMPOSITION_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.Application",
     "Microsoft.UI.Xaml.IApplicationFactory",
@@ -128,7 +152,12 @@ pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
     graphics.input_default().output(&graphics_output).filters(GRAPHICS_FILTERS.iter().copied()).flat();
     graphics.write();
 
-    eprintln!("wrote bindings.rs, composition.rs, graphics.rs from {} winmd files", metadata.len());
+    let conpty_output = workspace_root.join("crates").join("winuake-term").join("src").join("conpty_bindings.rs");
+    let mut conpty = windows_bindgen::builder();
+    conpty.input_default().output(&conpty_output).filters(CONPTY_FILTERS.iter().copied()).flat();
+    conpty.write();
+
+    eprintln!("wrote bindings.rs, composition.rs, graphics.rs, conpty_bindings.rs from {} winmd files", metadata.len());
     Ok(())
 }
 

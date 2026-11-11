@@ -11,3 +11,6 @@ workspace = true
 alacritty_terminal = { version = "0.26.0", default-features = false }
 thiserror = "2.0.21"
 tracing = "0.1.44"
+
+[target."cfg(windows)".dependencies]
+windows-core = "0.100.0"

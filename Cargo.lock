@@ -1325,6 +1325,7 @@ dependencies = [
  "alacritty_terminal",
  "thiserror",
  "tracing",
+ "windows-core",
 ]
 
 [[package]]
