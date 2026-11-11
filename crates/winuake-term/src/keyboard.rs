@@ -25,6 +25,8 @@ pub const VK_INSERT: i32 = 0x2D;
 pub const VK_DELETE: i32 = 0x2E;
 pub const VK_LWIN: i32 = 0x5B;
 pub const VK_RWIN: i32 = 0x5C;
+pub const VK_C: i32 = 0x43;
+pub const VK_V: i32 = 0x56;
 pub const VK_F1: i32 = 0x70;
 pub const VK_F12: i32 = 0x7B;
 pub const VK_LSHIFT: i32 = 0xA0;
@@ -41,13 +43,20 @@ pub enum KeyDownAction {
     Send(Key),
     /// A modifier or Windows key on its own; nothing to do and not handled.
     Ignore,
-    /// Printable input: wait for the `CharacterReceived` event, which knows the keyboard layout.
+    /// Printable input: wait for the character message, which knows the keyboard layout.
     AwaitCharacter,
+    /// Copy the selection to the clipboard.
+    Copy,
+    /// Paste the clipboard.
+    Paste,
 }
 
 pub fn decide_key_down(virtual_key: i32, modifiers: Modifiers) -> KeyDownAction {
     if is_modifier_key(virtual_key) {
         return KeyDownAction::Ignore;
+    }
+    if let Some(action) = clipboard_shortcut(virtual_key, modifiers) {
+        return action;
     }
     if let Some(key) = special_key(virtual_key) {
         return KeyDownAction::Send(key);
@@ -61,6 +70,17 @@ pub fn decide_key_down(virtual_key: i32, modifiers: Modifiers) -> KeyDownAction 
         return KeyDownAction::Send(Key::Character(character));
     }
     KeyDownAction::AwaitCharacter
+}
+
+/// Ctrl+Shift+C / Ctrl+Shift+V, Ctrl+Insert, Shift+Insert. Plain Ctrl+C and Ctrl+V still reach the shell.
+fn clipboard_shortcut(virtual_key: i32, modifiers: Modifiers) -> Option<KeyDownAction> {
+    match virtual_key {
+        VK_C if modifiers.control && modifiers.shift && !modifiers.alt => Some(KeyDownAction::Copy),
+        VK_V if modifiers.control && modifiers.shift && !modifiers.alt => Some(KeyDownAction::Paste),
+        VK_INSERT if modifiers.control && !modifiers.shift && !modifiers.alt => Some(KeyDownAction::Copy),
+        VK_INSERT if modifiers.shift && !modifiers.control && !modifiers.alt => Some(KeyDownAction::Paste),
+        _ => None,
+    }
 }
 
 pub fn is_modifier_key(virtual_key: i32) -> bool {
@@ -142,6 +162,7 @@ mod tests {
 
     const CTRL: Modifiers = Modifiers { shift: false, control: true, alt: false };
     const ALT: Modifiers = Modifiers { shift: false, control: false, alt: true };
+    const CTRL_SHIFT: Modifiers = Modifiers { shift: true, control: true, alt: false };
     const ALT_GR: Modifiers = Modifiers { shift: false, control: true, alt: true };
 
     #[test]
@@ -151,6 +172,21 @@ mod tests {
         assert_eq!(decide_key_down(VK_BACK, Modifiers::NONE), KeyDownAction::Send(Key::Backspace));
         assert_eq!(decide_key_down(VK_PRIOR, Modifiers::NONE), KeyDownAction::Send(Key::PageUp));
         assert_eq!(decide_key_down(VK_DELETE, ALT), KeyDownAction::Send(Key::Delete));
+    }
+
+    #[test]
+    fn given_clipboard_shortcuts_when_pressed_then_copy_and_paste_actions_are_chosen() {
+        assert_eq!(decide_key_down(VK_C, CTRL_SHIFT), KeyDownAction::Copy);
+        assert_eq!(decide_key_down(VK_V, CTRL_SHIFT), KeyDownAction::Paste);
+        assert_eq!(decide_key_down(VK_INSERT, CTRL), KeyDownAction::Copy);
+        assert_eq!(decide_key_down(VK_INSERT, Modifiers { shift: true, ..Modifiers::NONE }), KeyDownAction::Paste);
+    }
+
+    #[test]
+    fn given_plain_ctrl_c_and_ctrl_v_when_pressed_then_they_still_go_to_the_shell() {
+        assert_eq!(decide_key_down(VK_C, CTRL), KeyDownAction::Send(Key::Character('c')));
+        assert_eq!(decide_key_down(VK_V, CTRL), KeyDownAction::Send(Key::Character('v')));
+        assert_eq!(decide_key_down(VK_INSERT, Modifiers::NONE), KeyDownAction::Send(Key::Insert));
     }
 
     #[test]

@@ -9,6 +9,7 @@ use crate::composition::{
     IXamlMetadataProvider_Impl, IXamlType, LaunchActivatedEventArgs, TypeName, XmlnsDefinition,
 };
 use crate::terminal_view::{TerminalView, install_text_input_hook};
+use crate::window_native::IWindowNative;
 use std::cell::RefCell;
 use std::rc::Rc;
 use windows_core::{Array, HSTRING, Interface, Ref, Result, implement};
@@ -85,7 +86,8 @@ fn open_main_window() -> Result<()> {
     window.SetTitle(&HSTRING::from("Winuake"))?;
 
     let session = start_shell_session()?;
-    let view = TerminalView::create(session, &FontSpec::default(), ColorScheme::campbell())?;
+    let window_handle = window.cast::<IWindowNative>()?.handle()?;
+    let view = TerminalView::create(session, &FontSpec::default(), ColorScheme::campbell(), window_handle)?;
     window.SetContent(view.element())?;
     window.Activate()?;
     view.focus();

@@ -7,6 +7,8 @@ use crate::bindings::{
     ContentControl, DispatcherQueue, DispatcherQueueHandler, FocusState, HorizontalAlignment, SwapChainPanel,
     VerticalAlignment,
 };
+mod pointer;
+
 use crate::swap_chain_panel_native::ISwapChainPanelNative;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -18,8 +20,9 @@ use std::time::Duration;
 use windows_core::{Interface, Result};
 use winuake_render::color::ColorScheme;
 use winuake_render::gpu::{FontSpec, TerminalRenderer};
-use winuake_term::input::{Key, Modifiers, encode_key};
+use winuake_term::input::{Key, Modifiers, MouseButton, encode_key};
 use winuake_term::keyboard::{self, CharacterAssembler, KeyDownAction, decide_key_down, text_for_character};
+use winuake_term::pointer::{ClickCounter, WheelAccumulator};
 use winuake_term::pty::TerminalSize;
 use winuake_term::session::{SessionEvent, TerminalId, TerminalSession};
 
@@ -56,6 +59,13 @@ pub struct TerminalView {
     render: RefCell<RenderState>,
     scheme: ColorScheme,
     characters: RefCell<CharacterAssembler>,
+    /// Win32 handle of the application window; owns clipboard operations.
+    window_handle: isize,
+    selecting: Cell<bool>,
+    /// The button an application (mouse reporting) currently sees as held.
+    pressed_button: Cell<Option<MouseButton>>,
+    clicks: RefCell<ClickCounter>,
+    wheel: RefCell<WheelAccumulator>,
     redraw_pending: Arc<AtomicBool>,
     cursor_visible: Arc<AtomicBool>,
     /// Dropped with the view; background threads watch it to know when to stop.
@@ -64,7 +74,12 @@ pub struct TerminalView {
 
 impl TerminalView {
     /// Builds the view, registers it on the UI thread, and starts pumping session events into redraws.
-    pub fn create(session: TerminalSession, font: &FontSpec, scheme: ColorScheme) -> Result<Rc<Self>> {
+    pub fn create(
+        session: TerminalSession,
+        font: &FontSpec,
+        scheme: ColorScheme,
+        window_handle: isize,
+    ) -> Result<Rc<Self>> {
         let id = session.id();
         let session = Arc::new(session);
 
@@ -89,6 +104,11 @@ impl TerminalView {
             render: RefCell::new(RenderState { renderer, scale: 1.0 }),
             scheme,
             characters: RefCell::new(CharacterAssembler::default()),
+            window_handle,
+            selecting: Cell::new(false),
+            pressed_button: Cell::new(None),
+            clicks: RefCell::new(ClickCounter::default()),
+            wheel: RefCell::new(WheelAccumulator::default()),
             redraw_pending: Arc::new(AtomicBool::new(false)),
             cursor_visible: Arc::new(AtomicBool::new(true)),
             alive: Arc::new(()),
@@ -119,6 +139,26 @@ impl TerminalView {
         std::mem::forget(self.control.KeyDown(move |_, args| {
             if let Some(args) = args.as_ref() {
                 with_view(id, |view| view.handle_key_down(args));
+            }
+        })?);
+        std::mem::forget(self.control.PointerPressed(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                with_view(id, |view| view.handle_pointer_pressed(args));
+            }
+        })?);
+        std::mem::forget(self.control.PointerMoved(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                with_view(id, |view| view.handle_pointer_moved(args));
+            }
+        })?);
+        std::mem::forget(self.control.PointerReleased(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                with_view(id, |view| view.handle_pointer_released(args));
+            }
+        })?);
+        std::mem::forget(self.control.PointerWheelChanged(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                with_view(id, |view| view.handle_pointer_wheel(args));
             }
         })?);
         Ok(())
@@ -188,9 +228,20 @@ impl TerminalView {
         KEY_TARGET.with(|target| target.set(Some(self.id)));
         let Ok(virtual_key) = args.Key() else { return };
         let modifiers = current_modifiers();
-        if let KeyDownAction::Send(key) = decide_key_down(virtual_key.0, modifiers) {
-            self.send_key(key, modifiers);
-            let _ = args.SetHandled(true);
+        match decide_key_down(virtual_key.0, modifiers) {
+            KeyDownAction::Send(key) => {
+                self.send_key(key, modifiers);
+                let _ = args.SetHandled(true);
+            }
+            KeyDownAction::Copy => {
+                self.copy_selection();
+                let _ = args.SetHandled(true);
+            }
+            KeyDownAction::Paste => {
+                self.paste_clipboard();
+                let _ = args.SetHandled(true);
+            }
+            KeyDownAction::Ignore | KeyDownAction::AwaitCharacter => {}
         }
     }
 
@@ -205,8 +256,11 @@ impl TerminalView {
     fn send_key(&self, key: Key, modifiers: Modifiers) {
         let modes = self.session.with_emulator(|emulator| emulator.input_modes());
         let Some(bytes) = encode_key(key, modifiers, &modes) else { return };
-        // Typing returns to the live screen and makes the cursor solid.
-        self.session.update_emulator(|emulator| emulator.scroll_view(winuake_term::emulator::ScrollRequest::Bottom));
+        // Typing returns to the live screen, drops any selection, and makes the cursor solid.
+        self.session.update_emulator(|emulator| {
+            emulator.clear_selection();
+            emulator.scroll_view(winuake_term::emulator::ScrollRequest::Bottom);
+        });
         self.cursor_visible.store(true, Ordering::Relaxed);
         if let Err(error) = self.session.send_input(&bytes) {
             tracing::warn!(terminal_id = %self.id, %error, "could not send input to shell");
@@ -237,8 +291,6 @@ fn request_redraw(id: TerminalId, dispatcher: &DispatcherQueue, pending: &Atomic
     if pending.swap(true, Ordering::AcqRel) {
         return;
     }
-    let redraw_pending = Arc::new(());
-    let _ = redraw_pending;
     let handler = DispatcherQueueHandler::new(move || {
         with_view(id, |view| {
             view.redraw_pending.store(false, Ordering::Release);

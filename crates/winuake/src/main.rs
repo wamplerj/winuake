@@ -11,12 +11,16 @@ mod bindings {
 #[cfg(windows)]
 mod bootstrap;
 #[cfg(windows)]
+mod clipboard;
+#[cfg(windows)]
 #[allow(warnings, clippy::all)]
 mod composition;
 #[cfg(windows)]
 mod swap_chain_panel_native;
 #[cfg(windows)]
 mod terminal_view;
+#[cfg(windows)]
+mod window_native;
 
 #[cfg(windows)]
 fn main() -> windows_core::Result<()> {

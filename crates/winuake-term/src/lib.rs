@@ -4,6 +4,7 @@ pub mod activity;
 pub mod emulator;
 pub mod input;
 pub mod keyboard;
+pub mod pointer;
 pub mod process_launch;
 pub mod pty;
 pub mod session;
