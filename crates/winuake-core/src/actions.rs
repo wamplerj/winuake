@@ -2,7 +2,7 @@
 //! Every action Yakuake registers in its action collection, with its default shortcut.
 
 use crate::shortcut::Chord;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
@@ -123,6 +123,12 @@ impl Action {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ShortcutOverrideOutcome {
+    pub map: ShortcutMap,
+    pub problems: Vec<String>,
+}
+
 /// Which chord triggers which action.
 #[derive(Debug, Clone)]
 pub struct ShortcutMap {
@@ -138,6 +144,32 @@ impl ShortcutMap {
             .filter_map(|action| action.default_shortcut().map(|chord| (chord, action)))
             .collect();
         Self { bindings }
+    }
+
+    /// Defaults plus the user's overrides (action name to chord text, or `none` to unbind). Entries that name no action or hold an
+    /// unreadable chord are skipped and described in `problems`.
+    pub fn with_overrides(overrides: &BTreeMap<String, String>) -> ShortcutOverrideOutcome {
+        let mut map = Self::with_defaults();
+        let mut problems = Vec::new();
+        for (name, text) in overrides {
+            let Some(action) = Action::from_name(name) else {
+                problems.push(format!("`{name}` is not an action"));
+                continue;
+            };
+            if text.trim().eq_ignore_ascii_case("none") {
+                map.unbind(action);
+                continue;
+            }
+            match Chord::parse(text.trim()) {
+                Ok(chord) => map.bind(action, chord),
+                Err(error) => problems.push(format!("`{name}`: {error}")),
+            }
+        }
+        ShortcutOverrideOutcome { map, problems }
+    }
+
+    pub fn unbind(&mut self, action: Action) {
+        self.bindings.retain(|_, bound| *bound != action);
     }
 
     pub fn lookup(&self, chord: Chord) -> Option<Action> {
@@ -235,5 +267,40 @@ mod tests {
         assert_eq!(map.lookup(Chord::parse("Ctrl+Shift+T").unwrap()), None);
         assert_eq!(map.shortcut_for(Action::NewSession), Some(new_chord));
         assert_eq!(map.shortcut_for(Action::KeepOpen), None);
+    }
+
+    #[test]
+    fn given_overrides_when_building_the_map_then_they_replace_defaults_and_none_unbinds() {
+        let overrides = BTreeMap::from([
+            ("new-session".to_owned(), "Ctrl+Alt+N".to_owned()),
+            ("close-session".to_owned(), "none".to_owned()),
+            ("split-top-bottom".to_owned(), "Ctrl+Alt+H".to_owned()),
+        ]);
+        let outcome = ShortcutMap::with_overrides(&overrides);
+        assert!(outcome.problems.is_empty());
+        let map = outcome.map;
+        assert_eq!(map.lookup(Chord::parse("Ctrl+Alt+N").unwrap()), Some(Action::NewSession));
+        assert_eq!(map.lookup(Chord::parse("Ctrl+Shift+T").unwrap()), None);
+        assert_eq!(map.lookup(Chord::parse("Ctrl+Shift+W").unwrap()), None);
+        assert_eq!(map.shortcut_for(Action::CloseSession), None);
+        assert_eq!(map.lookup(Chord::parse("Ctrl+Alt+H").unwrap()), Some(Action::SplitTopBottom));
+    }
+
+    #[test]
+    fn given_bad_overrides_when_building_the_map_then_they_are_reported_and_defaults_stay() {
+        let overrides = BTreeMap::from([
+            ("no-such-action".to_owned(), "Ctrl+X".to_owned()),
+            ("new-session".to_owned(), "Banana".to_owned()),
+        ]);
+        let outcome = ShortcutMap::with_overrides(&overrides);
+        assert_eq!(outcome.problems.len(), 2);
+        assert_eq!(outcome.map.lookup(Chord::parse("Ctrl+Shift+T").unwrap()), Some(Action::NewSession));
+    }
+
+    #[test]
+    fn given_an_override_onto_a_used_chord_when_building_then_the_new_action_wins() {
+        let overrides = BTreeMap::from([("close-session".to_owned(), "Ctrl+Shift+T".to_owned())]);
+        let map = ShortcutMap::with_overrides(&overrides).map;
+        assert_eq!(map.lookup(Chord::parse("Ctrl+Shift+T").unwrap()), Some(Action::CloseSession));
     }
 }

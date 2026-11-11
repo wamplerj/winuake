@@ -33,6 +33,14 @@ pub struct WindowSettings {
     pub remember_fullscreen: bool,
     /// `Window/ShowSystrayIcon`.
     pub show_tray_icon: bool,
+    /// `Window/ShowTitleBar`.
+    pub show_title_bar: bool,
+    /// `Window/ShowTabBar`.
+    pub show_tab_bar: bool,
+    /// `Window/DynamicTabTitles`: tab titles follow the terminal title.
+    pub dynamic_tab_titles: bool,
+    /// `Behavior/FocusFollowsMouse`.
+    pub focus_follows_mouse: bool,
 }
 
 impl Default for WindowSettings {
@@ -51,6 +59,10 @@ impl Default for WindowSettings {
             open_after_start: false,
             remember_fullscreen: false,
             show_tray_icon: true,
+            show_title_bar: true,
+            show_tab_bar: true,
+            dynamic_tab_titles: false,
+            focus_follows_mouse: false,
         }
     }
 }
@@ -85,6 +97,12 @@ impl WindowSettings {
                 "keep_above" => value.parse().map(|parsed| self.keep_above = parsed).is_ok(),
                 "toggle_to_focus" => value.parse().map(|parsed| self.toggle_to_focus = parsed).is_ok(),
                 "show_on_all_desktops" => value.parse().map(|parsed| self.show_on_all_desktops = parsed).is_ok(),
+                "show_title_bar" => value.parse().map(|parsed| self.show_title_bar = parsed).is_ok(),
+                "show_tab_bar" => value.parse().map(|parsed| self.show_tab_bar = parsed).is_ok(),
+                "dynamic_tab_titles" => value.parse().map(|parsed| self.dynamic_tab_titles = parsed).is_ok(),
+                "keep_open_after_last_session_closes" => {
+                    value.parse().map(|parsed| self.keep_open_after_last_session_closes = parsed).is_ok()
+                }
                 "open_after_start" => value.parse().map(|parsed| self.open_after_start = parsed).is_ok(),
                 _ => {
                     problems.push(format!("unknown setting `{key}`"));
