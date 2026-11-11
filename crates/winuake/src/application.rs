@@ -78,6 +78,15 @@ pub fn run() -> Result<()> {
     }))
 }
 
+/// Ends the application: drops the window and terminal (which kills the shell) and leaves the XAML message loop.
+pub fn quit() {
+    tracing::info!("quitting");
+    MAIN_WINDOW.with(|slot| drop(slot.borrow_mut().take()));
+    if let Err(error) = Application::Current().and_then(|application| application.Exit()) {
+        tracing::error!(%error, "Application.Exit failed");
+    }
+}
+
 /// `XamlControlsResources` must be merged inside `OnLaunched`; doing it earlier crashes XAML.
 fn merge_control_resources() -> Result<()> {
     Application::Current()?.Resources()?.MergedDictionaries()?.Append(&XamlControlsResources::new()?)
@@ -94,6 +103,7 @@ fn open_main_window() -> Result<()> {
 
     let settings = window_settings();
     let open_after_start = settings.open_after_start;
+    crate::tray::install(settings.show_tray_icon)?;
     let focus_view = Rc::clone(&view);
     let host = DropDownHost::install(window_handle, settings, Box::new(move || focus_view.focus()))?;
 

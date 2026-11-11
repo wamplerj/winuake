@@ -1,7 +1,7 @@
 //! A thread-level `WH_GETMESSAGE` hook: sees every message the UI thread pulls from its queue, before XAML does.
 //!
 //! Used for text (`WM_CHAR`/`WM_SYSCHAR`, because XAML's `CharacterReceived` is never raised for this unpackaged app) and for the
-//! global hotkey and cross-instance commands, which are posted to the thread rather than a window.
+//! global hotkey, which is posted to the thread rather than a window.
 
 use windows_core::Result;
 
@@ -44,7 +44,7 @@ unsafe extern "system" fn message_hook(code: i32, w_parameter: usize, l_paramete
         match message.message {
             WM_CHAR | WM_SYSCHAR => crate::terminal_view::handle_text_message(message.w_parameter as u16),
             WM_HOTKEY => crate::drop_down::handle_hotkey(message.w_parameter as i32),
-            other => crate::drop_down::handle_thread_message(other),
+            _ => {}
         }
     }
     unsafe { CallNextHookEx(0, code, w_parameter, l_parameter) }

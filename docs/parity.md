@@ -6,22 +6,22 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 
 | Group | Key | Status | Phase | Notes |
 |---|---|---|---|---|
-| Window | Screen | todo | | |
-| Window | Width | todo | | |
-| Window | Height | todo | | |
-| Window | Position | todo | | |
-| Window | ShowOnAllDesktops | todo | | |
-| Window | KeepOpen | todo | | |
+| Window | Screen | done | 3 | `Screen` 0 follows the pointer; N = Nth monitor (primary first, then left to right) |
+| Window | Width | done | 3 | Percent of the work area; Alt+Shift+Right/Left adjust by 10 |
+| Window | Height | done | 3 | Percent of the work area; Alt+Shift+Down/Up adjust by 10 |
+| Window | Position | done | 3 |  |
+| Window | ShowOnAllDesktops | partial | 3 | No public pin API: the window is moved to the current virtual desktop when opened instead |
+| Window | KeepOpen | done | 3 | Retract on focus loss when off; the title bar toggle button comes with Phase 4/6 |
 | Window | KeepOpenAfterLastSessionCloses | todo | | |
-| Window | ToggleToFocus | todo | | |
-| Window | KeepAbove | todo | | |
+| Window | ToggleToFocus | done | 3 |  |
+| Window | KeepAbove | done | 3 | Topmost when `!KeepOpen \|\| KeepAbove` |
 | Window | ShowTitleBar | todo | | |
 | Window | ShowTabBar | todo | | |
 | Window | DynamicTabTitles | todo | | |
-| Window | ShowSystrayIcon | todo | | |
+| Window | ShowSystrayIcon | done | 3 | Stock icon until Phase 9 assets; left click toggles, right click menu |
 | Behavior | FocusFollowsMouse | todo | | |
-| Behavior | OpenAfterStart | todo | | |
-| Behavior | RememberFullscreen | todo | | |
+| Behavior | OpenAfterStart | done | 3 |  |
+| Behavior | RememberFullscreen | done | 3 |  |
 | Appearance | Skin | todo | | |
 | Appearance | SkinInstalledWithKns | todo | | |
 | Appearance | Translucency | todo | | |
@@ -34,8 +34,8 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | Appearance | KeyboardInputBlockIndicatorColor | todo | | |
 | Appearance | KeyboardInputBlockIndicatorOpacity | todo | | |
 | Appearance | KeyboardInputBlockIndicatorDuration | todo | | |
-| Animation | UseWMAssist | todo | | |
-| Animation | Frames | todo | | |
+| Animation | UseWMAssist | n/a |  | KWin effect; the Windows slide uses a clipped window region |
+| Animation | Frames | done | 3 | 10 ms per frame, linear, 0 = instant |
 | AutoOpen | PollMouse | todo | | |
 | AutoOpen | PollInterval | todo | | |
 | Dialogs | FirstRun | todo | | |
@@ -47,15 +47,15 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 |---|---|---|---|
 | `close-active-terminal` | todo | | |
 | `close-session` | todo | | |
-| `decrease-window-height` | todo | | |
-| `decrease-window-width` | todo | | |
+| `decrease-window-height` | done | 3 | Alt+Shift+Up |
+| `decrease-window-width` | done | 3 | Alt+Shift+Left |
 | `edit-profile` | todo | | |
 | `grow-terminal-bottom` | todo | | |
 | `grow-terminal-left` | todo | | |
 | `grow-terminal-right` | todo | | |
 | `grow-terminal-top` | todo | | |
-| `increase-window-height` | todo | | |
-| `increase-window-width` | todo | | |
+| `increase-window-height` | done | 3 | Alt+Shift+Down |
+| `increase-window-width` | done | 3 | Alt+Shift+Right |
 | `keep-open` | todo | | |
 | `manage-profiles` | todo | | |
 | `move-session-left` | todo | | |
@@ -78,8 +78,8 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `toggle-session-monitor-silence` | todo | | |
 | `toggle-session-prevent-closing` | todo | | |
 | `toggle-titlebar` | todo | | |
-| `toggle-window-state` | todo | | |
-| `view-full-screen` | todo | | |
+| `toggle-window-state` | done | 3 | Global hotkey (F12 if Windows allows it, else Win+`, Ctrl+`, Ctrl+Alt+`), tray icon, starting a second instance |
+| `view-full-screen` | done | 3 | Ctrl+Shift+F11 |
 
 ## Scripting API (D-Bus `Q_SCRIPTABLE`)
 

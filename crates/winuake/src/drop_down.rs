@@ -8,10 +8,10 @@ use crate::window_bindings::{
     DWMWCP_DONOTROUND, DwmSetWindowAttribute, EnumDisplayMonitors, GWL_EXSTYLE, GWL_STYLE, GetCurrentProcessId,
     GetCurrentThreadId, GetCursorPos, GetForegroundWindow, GetMonitorInfoW, GetWindowLongPtrW,
     GetWindowThreadProcessId, HDC, HMONITOR, HWND, HWND_NOTOPMOST, HWND_TOPMOST, IVirtualDesktopManager, KillTimer,
-    LPARAM, MOD_NOREPEAT, MONITORINFO, POINT, PostMessageW, RECT, RegisterHotKey, SW_HIDE, SW_SHOWNOACTIVATE,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetTimer,
-    SetWindowLongPtrW, SetWindowPos, SetWindowRgn, ShowWindow, WM_CLOSE, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-    WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_POPUP,
+    LPARAM, MOD_NOREPEAT, MONITORINFO, POINT, RECT, RegisterHotKey, SW_HIDE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, SetWindowRgn, ShowWindow, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    WS_POPUP,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -33,8 +33,6 @@ const MOD_ALT: u32 = 0x0001;
 const FOCUS_POLL_INTERVAL_MS: u32 = 100;
 const CLSCTX_ALL: u32 = 0x17;
 const MONITORINFOF_PRIMARY: u32 = 1;
-/// Posted by a second instance to ask the running one to toggle.
-pub const WM_TOGGLE_REQUEST: u32 = 0x8000 + 0x57; // WM_APP + 'W'
 
 struct HotkeyCandidate {
     name: &'static str,
@@ -394,11 +392,9 @@ pub fn handle_hotkey(id: i32) {
     }
 }
 
-/// Called from the message hook for messages other than text and hotkeys.
-pub fn handle_thread_message(message: u32) {
-    if message == WM_TOGGLE_REQUEST {
-        with_host(DropDownHost::toggle);
-    }
+/// Toggles the drop-down from anywhere on the UI thread (tray, second instance).
+pub fn toggle() {
+    with_host(DropDownHost::toggle);
 }
 
 /// Window-level keyboard shortcuts (resize, full screen, quit) from the terminal view.
@@ -409,8 +405,6 @@ pub fn dispatch_shortcut(shortcut: WindowShortcut) {
         WindowShortcut::IncreaseHeight => host.dispatch(DropDownEvent::AdjustHeight(PercentStep::Increase)),
         WindowShortcut::DecreaseHeight => host.dispatch(DropDownEvent::AdjustHeight(PercentStep::Decrease)),
         WindowShortcut::ToggleFullscreen => host.dispatch(DropDownEvent::ToggleFullscreen),
-        WindowShortcut::Quit => unsafe {
-            let _ = PostMessageW(Some(host.window), WM_CLOSE as u32, Default::default(), Default::default());
-        },
+        WindowShortcut::Quit => crate::application::quit(),
     });
 }

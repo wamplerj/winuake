@@ -20,9 +20,13 @@ mod drop_down;
 #[cfg(windows)]
 mod message_hook;
 #[cfg(windows)]
+mod single_instance;
+#[cfg(windows)]
 mod swap_chain_panel_native;
 #[cfg(windows)]
 mod terminal_view;
+#[cfg(windows)]
+mod tray;
 #[cfg(windows)]
 #[allow(warnings, clippy::all)]
 mod window_bindings;
@@ -35,6 +39,18 @@ const PER_MONITOR_AWARE_V2: isize = -4;
 
 #[cfg(windows)]
 windows_core::link!("user32.dll" "system" fn SetProcessDpiAwarenessContext(value: isize) -> i32);
+#[cfg(windows)]
+windows_core::link!("kernel32.dll" "system" fn TerminateProcess(process: isize, exit_code: u32) -> i32);
+
+/// Ends the process without `ExitProcess`'s DLL detach phase. With XAML, DirectComposition and the swap chain loaded, that phase can
+/// hang forever (a dead process that keeps its memory, handles, hotkeys and single-instance lock). Call only after our own cleanup.
+#[cfg(windows)]
+fn terminate_process_now(exit_code: u32) -> ! {
+    const CURRENT_PROCESS: isize = -1;
+    unsafe { TerminateProcess(CURRENT_PROCESS, exit_code) };
+    // TerminateProcess on the current process does not return; this satisfies the type system if it somehow does.
+    std::process::abort()
+}
 
 #[cfg(windows)]
 fn main() -> windows_core::Result<()> {
@@ -49,8 +65,17 @@ fn main() -> windows_core::Result<()> {
                 .unwrap_or_else(|_| "winuake=info,winuake_term=info".into()),
         )
         .init();
-    let _runtime = bootstrap::WindowsAppRuntime::initialize()?;
-    application::run()
+    if single_instance::claim() == single_instance::InstanceRole::AlreadyRunning {
+        single_instance::request_toggle();
+        return Ok(());
+    }
+    let runtime = bootstrap::WindowsAppRuntime::initialize()?;
+    let outcome = application::run();
+    tray::remove();
+    // Shutting the Windows App SDK runtime down while XAML's threads are still alive hangs process exit (one thread waits forever and the
+    // dead process keeps its memory, handles and single-instance lock). Everything we own is already cleaned up, so leave directly.
+    std::mem::forget(runtime);
+    terminate_process_now(u32::from(outcome.is_err()))
 }
 
 #[cfg(not(windows))]
