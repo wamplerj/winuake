@@ -26,6 +26,8 @@ pub const VK_DELETE: i32 = 0x2E;
 pub const VK_LWIN: i32 = 0x5B;
 pub const VK_RWIN: i32 = 0x5C;
 pub const VK_C: i32 = 0x43;
+pub const VK_Q: i32 = 0x51;
+pub const VK_F11: i32 = 0x7A;
 pub const VK_V: i32 = 0x56;
 pub const VK_F1: i32 = 0x70;
 pub const VK_F12: i32 = 0x7B;
@@ -35,6 +37,18 @@ const VK_OEM_2: i32 = 0xBF;
 const VK_OEM_4: i32 = 0xDB;
 const VK_OEM_5: i32 = 0xDC;
 const VK_OEM_6: i32 = 0xDD;
+
+/// Actions on the application window rather than the terminal. Yakuake's defaults: Alt+Shift+arrows resize the window,
+/// Ctrl+Shift+F11 toggles full screen, Ctrl+Shift+Q quits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowShortcut {
+    IncreaseWidth,
+    DecreaseWidth,
+    IncreaseHeight,
+    DecreaseHeight,
+    ToggleFullscreen,
+    Quit,
+}
 
 /// What the terminal view should do with a `KeyDown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,11 +63,16 @@ pub enum KeyDownAction {
     Copy,
     /// Paste the clipboard.
     Paste,
+    /// An action on the application window.
+    Window(WindowShortcut),
 }
 
 pub fn decide_key_down(virtual_key: i32, modifiers: Modifiers) -> KeyDownAction {
     if is_modifier_key(virtual_key) {
         return KeyDownAction::Ignore;
+    }
+    if let Some(shortcut) = window_shortcut(virtual_key, modifiers) {
+        return KeyDownAction::Window(shortcut);
     }
     if let Some(action) = clipboard_shortcut(virtual_key, modifiers) {
         return action;
@@ -70,6 +89,26 @@ pub fn decide_key_down(virtual_key: i32, modifiers: Modifiers) -> KeyDownAction 
         return KeyDownAction::Send(Key::Character(character));
     }
     KeyDownAction::AwaitCharacter
+}
+
+fn window_shortcut(virtual_key: i32, modifiers: Modifiers) -> Option<WindowShortcut> {
+    if modifiers.alt && modifiers.shift && !modifiers.control {
+        return match virtual_key {
+            VK_RIGHT => Some(WindowShortcut::IncreaseWidth),
+            VK_LEFT => Some(WindowShortcut::DecreaseWidth),
+            VK_DOWN => Some(WindowShortcut::IncreaseHeight),
+            VK_UP => Some(WindowShortcut::DecreaseHeight),
+            _ => None,
+        };
+    }
+    if modifiers.control && modifiers.shift && !modifiers.alt {
+        return match virtual_key {
+            VK_F11 => Some(WindowShortcut::ToggleFullscreen),
+            VK_Q => Some(WindowShortcut::Quit),
+            _ => None,
+        };
+    }
+    None
 }
 
 /// Ctrl+Shift+C / Ctrl+Shift+V, Ctrl+Insert, Shift+Insert. Plain Ctrl+C and Ctrl+V still reach the shell.
@@ -180,6 +219,29 @@ mod tests {
         assert_eq!(decide_key_down(VK_V, CTRL_SHIFT), KeyDownAction::Paste);
         assert_eq!(decide_key_down(VK_INSERT, CTRL), KeyDownAction::Copy);
         assert_eq!(decide_key_down(VK_INSERT, Modifiers { shift: true, ..Modifiers::NONE }), KeyDownAction::Paste);
+    }
+
+    #[test]
+    fn given_alt_shift_arrows_when_pressed_then_the_window_is_resized() {
+        let alt_shift = Modifiers { shift: true, control: false, alt: true };
+        assert_eq!(decide_key_down(VK_RIGHT, alt_shift), KeyDownAction::Window(WindowShortcut::IncreaseWidth));
+        assert_eq!(decide_key_down(VK_LEFT, alt_shift), KeyDownAction::Window(WindowShortcut::DecreaseWidth));
+        assert_eq!(decide_key_down(VK_DOWN, alt_shift), KeyDownAction::Window(WindowShortcut::IncreaseHeight));
+        assert_eq!(decide_key_down(VK_UP, alt_shift), KeyDownAction::Window(WindowShortcut::DecreaseHeight));
+    }
+
+    #[test]
+    fn given_ctrl_shift_f11_and_q_when_pressed_then_fullscreen_and_quit_are_chosen() {
+        assert_eq!(decide_key_down(VK_F11, CTRL_SHIFT), KeyDownAction::Window(WindowShortcut::ToggleFullscreen));
+        assert_eq!(decide_key_down(VK_Q, CTRL_SHIFT), KeyDownAction::Window(WindowShortcut::Quit));
+    }
+
+    #[test]
+    fn given_plain_arrows_or_other_modifier_combinations_when_pressed_then_the_shell_gets_them() {
+        assert_eq!(decide_key_down(VK_RIGHT, Modifiers::NONE), KeyDownAction::Send(Key::ArrowRight));
+        assert_eq!(decide_key_down(VK_RIGHT, ALT), KeyDownAction::Send(Key::ArrowRight));
+        assert_eq!(decide_key_down(VK_RIGHT, CTRL), KeyDownAction::Send(Key::ArrowRight));
+        assert_eq!(decide_key_down(VK_Q, CTRL), KeyDownAction::Send(Key::Character('q')));
     }
 
     #[test]

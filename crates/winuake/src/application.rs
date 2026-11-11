@@ -8,11 +8,13 @@ use crate::composition::{
     Application as ComposedApplication, IApplicationOverrides, IApplicationOverrides_Impl, IXamlMetadataProvider,
     IXamlMetadataProvider_Impl, IXamlType, LaunchActivatedEventArgs, TypeName, XmlnsDefinition,
 };
-use crate::terminal_view::{TerminalView, install_text_input_hook};
+use crate::drop_down::DropDownHost;
+use crate::terminal_view::TerminalView;
 use crate::window_native::IWindowNative;
 use std::cell::RefCell;
 use std::rc::Rc;
 use windows_core::{Array, HSTRING, Interface, Ref, Result, implement};
+use winuake_config::window::WindowSettings;
 use winuake_render::color::ColorScheme;
 use winuake_render::gpu::FontSpec;
 use winuake_term::conpty::ConPtyBackend;
@@ -35,7 +37,7 @@ impl IApplicationOverrides_Impl for WinuakeApplication_Impl {
     fn OnLaunched(&self, _args: Ref<LaunchActivatedEventArgs>) -> Result<()> {
         tracing::info!("application launched");
         merge_control_resources()?;
-        install_text_input_hook()?;
+        crate::message_hook::install()?;
         open_main_window()
     }
 }
@@ -89,11 +91,32 @@ fn open_main_window() -> Result<()> {
     let window_handle = window.cast::<IWindowNative>()?.handle()?;
     let view = TerminalView::create(session, &FontSpec::default(), ColorScheme::campbell(), window_handle)?;
     window.SetContent(view.element())?;
+
+    let settings = window_settings();
+    let open_after_start = settings.open_after_start;
+    let focus_view = Rc::clone(&view);
+    let host = DropDownHost::install(window_handle, settings, Box::new(move || focus_view.focus()))?;
+
+    // Show once, off screen, so XAML lays the terminal out at its real size; then hide until the first toggle.
+    host.park_for_first_layout();
     window.Activate()?;
-    view.focus();
+    host.hide_now();
+    if open_after_start {
+        host.toggle();
+    }
 
     MAIN_WINDOW.with(|slot| *slot.borrow_mut() = Some((window, view)));
     Ok(())
+}
+
+/// Defaults, plus `WINUAKE_WINDOW_SETTINGS` overrides (for example `frames=50+keep_open=false`) until the settings file exists.
+fn window_settings() -> WindowSettings {
+    let Some(overrides) = std::env::var_os("WINUAKE_WINDOW_SETTINGS") else { return WindowSettings::default() };
+    let (settings, problems) = WindowSettings::default().with_overrides(&overrides.to_string_lossy());
+    for problem in problems {
+        tracing::warn!(%problem, "ignored a window setting override");
+    }
+    settings
 }
 
 fn start_shell_session() -> Result<TerminalSession> {

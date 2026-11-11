@@ -11,5 +11,6 @@ sync_tree() {
   (cd "$REPO_ROOT" && git ls-files -co --exclude-standard -z | tar --null -T - -cf "$tarball")
   scp -q "${SSH_OPTIONS[@]}" "$tarball" "$VM_SSH:winuake-src.tar" 2>/dev/null
   rm -f "$tarball"
-  ssh_quiet 'if not exist src\winuake mkdir src\winuake & cd src\winuake & tar -xf ..\..\winuake-src.tar'
+  # Parentheses matter: in cmd, `if ... & next` makes everything after the `if` conditional.
+  ssh_quiet '(if not exist src\winuake mkdir src\winuake) & cd src\winuake & tar -xf ..\..\winuake-src.tar'
 }

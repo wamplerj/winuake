@@ -70,6 +70,8 @@ pub struct DropDownController {
     last_frame: Option<u32>,
     /// Becomes true once the window has actually been seen with focus; focus loss before that is the open itself settling.
     seen_active: bool,
+    /// Focus was lost while the opening animation was still running; retract as soon as it finishes.
+    focus_lost_while_opening: bool,
 }
 
 impl DropDownController {
@@ -81,6 +83,7 @@ impl DropDownController {
             final_rect: None,
             last_frame: None,
             seen_active: false,
+            focus_lost_while_opening: false,
         }
     }
 
@@ -145,6 +148,7 @@ impl DropDownController {
         let Some(rect) = self.target_rect(context) else { return Vec::new() };
         self.final_rect = Some(rect);
         self.seen_active = false;
+        self.focus_lost_while_opening = false;
         self.last_frame = None;
 
         let mut commands = vec![DropDownCommand::SetTopmost(self.settings.wants_topmost())];
@@ -211,10 +215,14 @@ impl DropDownController {
             }
             None if direction == SlideDirection::Opening => {
                 self.state = DropDownState::Open;
-                vec![
+                let mut commands = vec![
                     DropDownCommand::PositionWindow(SlideFrame::settled(final_rect)),
                     DropDownCommand::StopAnimationTimer,
-                ]
+                ];
+                if std::mem::take(&mut self.focus_lost_while_opening) {
+                    commands.extend(self.retract());
+                }
+                commands
             }
             None => {
                 let mut commands = vec![DropDownCommand::StopAnimationTimer];
@@ -225,15 +233,20 @@ impl DropDownController {
     }
 
     fn focus_changed(&mut self, has_focus: bool, belongs_to_window: bool) -> Vec<DropDownCommand> {
-        if self.state != DropDownState::Open {
+        if !matches!(self.state, DropDownState::Opening | DropDownState::Open) {
             return Vec::new();
         }
         if has_focus {
             self.seen_active = true;
+            self.focus_lost_while_opening = false;
             return Vec::new();
         }
         // Focus going to the app's own windows (dialogs) never retracts; before the first focus the window is still settling.
         if belongs_to_window || !self.seen_active || self.settings.keep_open {
+            return Vec::new();
+        }
+        if self.state == DropDownState::Opening {
+            self.focus_lost_while_opening = true;
             return Vec::new();
         }
         self.retract()
@@ -486,6 +499,55 @@ mod tests {
                 .handle(DropDownEvent::FocusChanged { active: false, belongs_to_window: false }, &context(false))
                 .is_empty()
         );
+        assert_eq!(controller.state(), DropDownState::Open);
+    }
+
+    #[test]
+    fn given_focus_arrives_during_the_opening_animation_when_it_is_lost_after_opening_then_the_window_retracts() {
+        let mut controller = controller(WindowSettings { keep_open: false, ..animated() });
+        controller.handle(DropDownEvent::Toggle, &context(false));
+        controller.handle(DropDownEvent::FocusChanged { active: true, belongs_to_window: false }, &context(true));
+        controller.handle(DropDownEvent::AnimationTick(Duration::from_millis(200)), &context(true));
+        assert_eq!(controller.state(), DropDownState::Open);
+
+        let commands =
+            controller.handle(DropDownEvent::FocusChanged { active: false, belongs_to_window: false }, &context(false));
+        assert_eq!(commands, vec![DropDownCommand::StopFocusWatch, DropDownCommand::StartAnimationTimer]);
+        assert_eq!(controller.state(), DropDownState::Closing);
+    }
+
+    #[test]
+    fn given_focus_is_lost_during_the_opening_animation_then_the_window_retracts_as_soon_as_it_has_opened() {
+        let mut controller = controller(WindowSettings { keep_open: false, ..animated() });
+        controller.handle(DropDownEvent::Toggle, &context(false));
+        controller.handle(DropDownEvent::FocusChanged { active: true, belongs_to_window: false }, &context(true));
+        assert!(
+            controller
+                .handle(DropDownEvent::FocusChanged { active: false, belongs_to_window: false }, &context(false))
+                .is_empty()
+        );
+
+        let settled = controller.handle(DropDownEvent::AnimationTick(Duration::from_millis(200)), &context(false));
+        assert_eq!(
+            settled,
+            vec![
+                DropDownCommand::PositionWindow(SlideFrame::settled(final_rect())),
+                DropDownCommand::StopAnimationTimer,
+                DropDownCommand::StopFocusWatch,
+                DropDownCommand::StartAnimationTimer,
+            ]
+        );
+        assert_eq!(controller.state(), DropDownState::Closing);
+    }
+
+    #[test]
+    fn given_focus_returns_during_the_opening_animation_then_the_pending_retract_is_cancelled() {
+        let mut controller = controller(WindowSettings { keep_open: false, ..animated() });
+        controller.handle(DropDownEvent::Toggle, &context(false));
+        controller.handle(DropDownEvent::FocusChanged { active: true, belongs_to_window: false }, &context(true));
+        controller.handle(DropDownEvent::FocusChanged { active: false, belongs_to_window: false }, &context(false));
+        controller.handle(DropDownEvent::FocusChanged { active: true, belongs_to_window: false }, &context(true));
+        controller.handle(DropDownEvent::AnimationTick(Duration::from_millis(200)), &context(true));
         assert_eq!(controller.state(), DropDownState::Open);
     }
 

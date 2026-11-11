@@ -65,6 +65,39 @@ impl WindowSettings {
         self
     }
 
+    /// Applies `key=value` overrides separated by commas, `+` or `;` (for example `frames=50+keep_open=false`). Meant for tests and
+    /// development until the settings file exists. Returns the new settings and a message for every entry that was ignored.
+    pub fn with_overrides(mut self, text: &str) -> (Self, Vec<String>) {
+        let mut problems = Vec::new();
+        for entry in text.split([',', '+', ';']).map(str::trim).filter(|entry| !entry.is_empty()) {
+            let Some((key, value)) = entry.split_once('=') else {
+                problems.push(format!("`{entry}` is not key=value"));
+                continue;
+            };
+            let (key, value) = (key.trim(), value.trim());
+            let applied = match key {
+                "screen" => value.parse().map(|parsed| self.screen = parsed).is_ok(),
+                "width" => value.parse().map(|parsed| self.width_percent = parsed).is_ok(),
+                "height" => value.parse().map(|parsed| self.height_percent = parsed).is_ok(),
+                "position" => value.parse().map(|parsed| self.position_percent = parsed).is_ok(),
+                "frames" => value.parse().map(|parsed| self.frames = parsed).is_ok(),
+                "keep_open" => value.parse().map(|parsed| self.keep_open = parsed).is_ok(),
+                "keep_above" => value.parse().map(|parsed| self.keep_above = parsed).is_ok(),
+                "toggle_to_focus" => value.parse().map(|parsed| self.toggle_to_focus = parsed).is_ok(),
+                "show_on_all_desktops" => value.parse().map(|parsed| self.show_on_all_desktops = parsed).is_ok(),
+                "open_after_start" => value.parse().map(|parsed| self.open_after_start = parsed).is_ok(),
+                _ => {
+                    problems.push(format!("unknown setting `{key}`"));
+                    continue;
+                }
+            };
+            if !applied {
+                problems.push(format!("`{value}` is not a valid value for `{key}`"));
+            }
+        }
+        (self.clamped(), problems)
+    }
+
     /// Topmost unless the window is meant to stay open without being kept above (Yakuake `applyWindowProperties`).
     pub fn wants_topmost(&self) -> bool {
         !self.keep_open || self.keep_above
@@ -109,6 +142,30 @@ mod tests {
     #[test]
     fn given_in_range_values_when_clamping_then_nothing_changes() {
         assert_eq!(WindowSettings::default().clamped(), WindowSettings::default());
+    }
+
+    #[test]
+    fn given_overrides_when_applying_then_listed_settings_change_and_others_keep_their_defaults() {
+        let (settings, problems) =
+            WindowSettings::default().with_overrides("frames=50+keep_open=false, width=70;screen=2");
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!((settings.frames, settings.keep_open, settings.width_percent, settings.screen), (50, false, 70, 2));
+        assert_eq!(settings.height_percent, WindowSettings::default().height_percent);
+    }
+
+    #[test]
+    fn given_bad_overrides_when_applying_then_they_are_reported_and_ignored() {
+        let (settings, problems) = WindowSettings::default().with_overrides("bogus=1+frames=lots+oops+width=5");
+        assert_eq!(problems.len(), 3, "{problems:?}");
+        assert_eq!(settings.frames, 17);
+        assert_eq!(settings.width_percent, 10, "valid but out-of-range values are clamped");
+    }
+
+    #[test]
+    fn given_empty_overrides_when_applying_then_nothing_changes() {
+        let (settings, problems) = WindowSettings::default().with_overrides("");
+        assert!(problems.is_empty());
+        assert_eq!(settings, WindowSettings::default());
     }
 
     #[test]

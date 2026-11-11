@@ -173,6 +173,63 @@ const RENDER_FILTERS: &[&str] = &[
     "DWRITE_LINE_METRICS",
 ];
 
+/// Win32 window management used by the drop-down host in `winuake`.
+const WINDOW_FILTERS: &[&str] = &[
+    "SetWindowPos",
+    "GetWindowLongPtrW",
+    "SetWindowLongPtrW",
+    "ShowWindow",
+    "SetWindowRgn",
+    "CreateRectRgn",
+    "SetForegroundWindow",
+    "BringWindowToTop",
+    "GetForegroundWindow",
+    "GetCursorPos",
+    "EnumDisplayMonitors",
+    "GetMonitorInfoW",
+    "MONITORINFO",
+    "RegisterHotKey",
+    "UnregisterHotKey",
+    "SetTimer",
+    "KillTimer",
+    "GetWindowThreadProcessId",
+    "AttachThreadInput",
+    "GetCurrentThreadId",
+    "GetCurrentProcessId",
+    "CoCreateInstance",
+    "CoInitializeEx",
+    "IVirtualDesktopManager",
+    "VirtualDesktopManager",
+    "DwmSetWindowAttribute",
+    "PostMessageW",
+    "IsWindowVisible",
+    "HWND_TOPMOST",
+    "HWND_NOTOPMOST",
+    "SWP_NOSIZE",
+    "SWP_NOMOVE",
+    "SWP_NOZORDER",
+    "SWP_NOACTIVATE",
+    "SWP_FRAMECHANGED",
+    "SW_HIDE",
+    "SW_SHOWNOACTIVATE",
+    "WS_POPUP",
+    "WS_CLIPCHILDREN",
+    "WS_CLIPSIBLINGS",
+    "WS_EX_TOOLWINDOW",
+    "WS_EX_APPWINDOW",
+    "GWL_STYLE",
+    "GWL_EXSTYLE",
+    "MOD_NOREPEAT",
+    "WM_HOTKEY",
+    "WM_CLOSE",
+    "WM_APP",
+    "DWMWA_WINDOW_CORNER_PREFERENCE",
+    "DWMWCP_DONOTROUND",
+    "POINT",
+    "RECT",
+    "HWND",
+];
+
 const COMPOSITION_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.Application",
     "Microsoft.UI.Xaml.IApplicationFactory",
@@ -218,13 +275,18 @@ pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
     conpty.input_default().output(&conpty_output).filters(CONPTY_FILTERS.iter().copied()).flat();
     conpty.write();
 
+    let window_output = source_directory.join("window_bindings.rs");
+    let mut window = windows_bindgen::builder();
+    window.input_default().output(&window_output).filters(WINDOW_FILTERS.iter().copied()).flat();
+    window.write();
+
     let render_output = workspace_root.join("crates").join("winuake-render").join("src").join("gpu_bindings.rs");
     let mut render = windows_bindgen::builder();
     render.input_default().output(&render_output).filters(RENDER_FILTERS.iter().copied()).flat();
     render.write();
 
     eprintln!(
-        "wrote bindings.rs, composition.rs, conpty_bindings.rs, gpu_bindings.rs from {} winmd files",
+        "wrote bindings.rs, composition.rs, window_bindings.rs, conpty_bindings.rs, gpu_bindings.rs from {} winmd files",
         metadata.len()
     );
     Ok(())

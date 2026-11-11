@@ -241,6 +241,10 @@ impl TerminalView {
                 self.paste_clipboard();
                 let _ = args.SetHandled(true);
             }
+            KeyDownAction::Window(shortcut) => {
+                crate::drop_down::dispatch_shortcut(shortcut);
+                let _ = args.SetHandled(true);
+            }
             KeyDownAction::Ignore | KeyDownAction::AwaitCharacter => {}
         }
     }
@@ -352,51 +356,9 @@ fn spawn_cursor_blinker(
     }
 }
 
-// --- Text input -------------------------------------------------------------------------------------------------------------------
-//
-// XAML's `CharacterReceived` is never raised for this unpackaged WinUI 3 setup, so text is read from the thread's message queue.
-// `WM_CHAR` / `WM_SYSCHAR` carry exactly what the keyboard layout (including dead keys) and IME produced.
-
-const WH_GETMESSAGE: i32 = 3;
-const HC_ACTION: i32 = 0;
-const PM_REMOVE: usize = 1;
-const WM_CHAR: u32 = 0x0102;
-const WM_SYSCHAR: u32 = 0x0106;
-
-#[repr(C)]
-struct WindowMessage {
-    window: isize,
-    message: u32,
-    w_parameter: usize,
-    l_parameter: isize,
-    time: u32,
-    point_x: i32,
-    point_y: i32,
-}
-
-type HookCallback = unsafe extern "system" fn(code: i32, w_parameter: usize, l_parameter: isize) -> isize;
-
-windows_core::link!("user32.dll" "system" fn SetWindowsHookExW(hook_kind: i32, callback: HookCallback, module: isize, thread_id: u32) -> isize);
-windows_core::link!("user32.dll" "system" fn CallNextHookEx(hook: isize, code: i32, w_parameter: usize, l_parameter: isize) -> isize);
-windows_core::link!("kernel32.dll" "system" fn GetCurrentThreadId() -> u32);
-
-/// Routes text typed into the focused terminal to its shell. Call once, on the UI thread.
-pub fn install_text_input_hook() -> Result<()> {
-    let hook = unsafe { SetWindowsHookExW(WH_GETMESSAGE, text_message_hook, 0, GetCurrentThreadId()) };
-    if hook == 0 {
-        return Err(windows_core::Error::from_thread());
+/// Routes a UTF-16 unit from `WM_CHAR` / `WM_SYSCHAR` to the view that received the latest key press.
+pub fn handle_text_message(unit: u16) {
+    if let Some(id) = KEY_TARGET.with(Cell::get) {
+        with_view(id, |view| view.handle_character_unit(unit));
     }
-    Ok(())
-}
-
-unsafe extern "system" fn text_message_hook(code: i32, w_parameter: usize, l_parameter: isize) -> isize {
-    if code == HC_ACTION && w_parameter == PM_REMOVE {
-        let message = unsafe { &*(l_parameter as *const WindowMessage) };
-        if matches!(message.message, WM_CHAR | WM_SYSCHAR)
-            && let Some(id) = KEY_TARGET.with(Cell::get)
-        {
-            with_view(id, |view| view.handle_character_unit(message.w_parameter as u16));
-        }
-    }
-    unsafe { CallNextHookEx(0, code, w_parameter, l_parameter) }
 }
