@@ -11,6 +11,8 @@ mod bindings {
 #[cfg(windows)]
 mod bootstrap;
 #[cfg(windows)]
+mod chrome;
+#[cfg(windows)]
 mod clipboard;
 #[cfg(windows)]
 #[allow(warnings, clippy::all)]
@@ -32,6 +34,8 @@ mod tray;
 mod window_bindings;
 #[cfg(windows)]
 mod window_native;
+#[cfg(windows)]
+mod workspace_host;
 
 /// `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`.
 #[cfg(windows)]

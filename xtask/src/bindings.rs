@@ -47,6 +47,17 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Windows.Foundation.PropertyValue::CreateString",
     "Windows.Foundation.Collections.IVector",
     "Windows.Foundation.Collections.IIterable",
+    // Phase 4: tab bar, title bar and split panes are loaded from XAML markup and positioned with margins.
+    "Microsoft.UI.Xaml.Markup.XamlReader::Load",
+    "Microsoft.UI.Xaml.Markup.IXamlReaderStatics",
+    "Microsoft.UI.Xaml.FrameworkElement::{FindName, put_Margin}",
+    "Microsoft.UI.Xaml.Thickness",
+    "Microsoft.UI.Xaml.UIElement::{put_Visibility, add_GotFocus, add_LostFocus}",
+    "Microsoft.UI.Xaml.Visibility",
+    "Microsoft.UI.Xaml.RoutedEventHandler",
+    "Microsoft.UI.Xaml.Controls.TextBox::{get_Text, put_Text, SelectAll}",
+    "Microsoft.UI.Xaml.Controls.ITextBoxStatics",
+    "Microsoft.UI.Xaml.Controls.ITextBoxFactory",
     "Microsoft.UI.Xaml.IDependencyPropertyStatics",
     "Microsoft.UI.Xaml.IPropertyMetadataFactory",
     "Microsoft.UI.Xaml.IPropertyMetadataStatics",
@@ -175,6 +186,15 @@ const RENDER_FILTERS: &[&str] = &[
 
 /// Win32 window management used by the drop-down host in `winuake`.
 const WINDOW_FILTERS: &[&str] = &[
+    "MF_CHECKED",
+    "MF_GRAYED",
+    "GetTickCount64",
+    "GetDoubleClickTime",
+    "MessageBoxW",
+    "MB_OKCANCEL",
+    "MB_ICONWARNING",
+    "MB_DEFBUTTON2",
+    "IDOK",
     "SetWindowPos",
     "GetWindowLongPtrW",
     "SetWindowLongPtrW",

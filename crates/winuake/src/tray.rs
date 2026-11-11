@@ -11,7 +11,6 @@ use crate::window_bindings::{
 };
 use std::cell::Cell;
 use windows_core::{PCWSTR, Result, w};
-use winuake_term::keyboard::WindowShortcut;
 
 /// Class name other instances look up to ask this one to toggle.
 pub const MESSAGE_WINDOW_CLASS: PCWSTR = w!("WinuakeMessageWindow");
@@ -134,7 +133,7 @@ fn show_menu(window: HWND) {
 
         match chosen {
             MENU_TOGGLE => crate::drop_down::toggle(),
-            MENU_QUIT => crate::drop_down::dispatch_shortcut(WindowShortcut::Quit),
+            MENU_QUIT => crate::workspace_host::request_quit(),
             _ => {}
         }
     }

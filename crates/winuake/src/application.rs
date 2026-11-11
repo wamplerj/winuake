@@ -1,4 +1,4 @@
-//! Winuake application object and main window. Phase 2 shows one terminal in a plain window; Phase 3 turns it into the drop-down.
+//! Winuake application object and main window: the drop-down host plus the workspace of sessions inside it.
 
 use crate::bindings::{
     Application, ApplicationInitializationCallback, TypeKind as BindingsTypeKind, TypeName as BindingsTypeName, Window,
@@ -9,22 +9,16 @@ use crate::composition::{
     IXamlMetadataProvider_Impl, IXamlType, LaunchActivatedEventArgs, TypeName, XmlnsDefinition,
 };
 use crate::drop_down::DropDownHost;
-use crate::terminal_view::TerminalView;
 use crate::window_native::IWindowNative;
+use crate::workspace_host::WorkspaceHost;
 use std::cell::RefCell;
-use std::rc::Rc;
 use windows_core::{Array, HSTRING, Interface, Ref, Result, implement};
 use winuake_config::window::WindowSettings;
-use winuake_render::color::ColorScheme;
-use winuake_render::gpu::FontSpec;
-use winuake_term::conpty::ConPtyBackend;
-use winuake_term::pty::{EnvironmentVariable, PtySpawnRequest, TerminalSize};
-use winuake_term::session::{TerminalId, TerminalSession};
-use winuake_term::shell::{PathVariableLocator, ShellResolver};
+use winuake_core::sessions::session::SessionKind;
 
 thread_local! {
     /// Keeps the main window and its terminal alive for the life of the UI thread.
-    static MAIN_WINDOW: RefCell<Option<(Window, Rc<TerminalView>)>> = const { RefCell::new(None) };
+    static MAIN_WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
 }
 
 /// Application subclass. Delegates XAML type lookup for built-in WinUI controls to the framework's own provider.
@@ -81,6 +75,7 @@ pub fn run() -> Result<()> {
 /// Ends the application: drops the window and terminal (which kills the shell) and leaves the XAML message loop.
 pub fn quit() {
     tracing::info!("quitting");
+    crate::workspace_host::shutdown();
     MAIN_WINDOW.with(|slot| drop(slot.borrow_mut().take()));
     if let Err(error) = Application::Current().and_then(|application| application.Exit()) {
         tracing::error!(%error, "Application.Exit failed");
@@ -96,16 +91,15 @@ fn open_main_window() -> Result<()> {
     let window = Window::new()?;
     window.SetTitle(&HSTRING::from("Winuake"))?;
 
-    let session = start_shell_session()?;
     let window_handle = window.cast::<IWindowNative>()?.handle()?;
-    let view = TerminalView::create(session, &FontSpec::default(), ColorScheme::campbell(), window_handle)?;
-    window.SetContent(view.element())?;
+    let workspace = WorkspaceHost::install(window_handle)?;
+    window.SetContent(&workspace.root())?;
+    workspace.add_session(SessionKind::Single);
 
     let settings = window_settings();
     let open_after_start = settings.open_after_start;
     crate::tray::install(settings.show_tray_icon)?;
-    let focus_view = Rc::clone(&view);
-    let host = DropDownHost::install(window_handle, settings, Box::new(move || focus_view.focus()))?;
+    let host = DropDownHost::install(window_handle, settings, Box::new(crate::workspace_host::focus_active_terminal))?;
 
     // Show once, off screen, so XAML lays the terminal out at its real size; then hide until the first toggle.
     host.park_for_first_layout();
@@ -115,7 +109,7 @@ fn open_main_window() -> Result<()> {
         host.toggle();
     }
 
-    MAIN_WINDOW.with(|slot| *slot.borrow_mut() = Some((window, view)));
+    MAIN_WINDOW.with(|slot| *slot.borrow_mut() = Some(window));
     Ok(())
 }
 
@@ -127,21 +121,4 @@ fn window_settings() -> WindowSettings {
         tracing::warn!(%problem, "ignored a window setting override");
     }
     settings
-}
-
-fn start_shell_session() -> Result<TerminalSession> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let shell = ShellResolver::new(PathVariableLocator::from_path_variable(&path), std::env::var("COMSPEC").ok())
-        .resolve_default_shell();
-    let request = PtySpawnRequest {
-        program: shell.program,
-        arguments: shell.arguments,
-        working_directory: std::env::var_os("USERPROFILE").map(Into::into),
-        environment: vec![EnvironmentVariable { name: "COLORTERM".to_owned(), value: "truecolor".to_owned() }],
-        size: TerminalSize::new(80, 24),
-    };
-    TerminalSession::start(TerminalId(1), &ConPtyBackend, &request).map_err(|error| {
-        tracing::error!(%error, "could not start the shell");
-        windows_core::Error::new(windows_core::HRESULT(0x8000_4005_u32 as i32), error.to_string())
-    })
 }

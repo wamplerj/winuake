@@ -39,6 +39,21 @@ thread_local! {
     static VIEWS: RefCell<HashMap<TerminalId, Rc<TerminalView>>> = RefCell::new(HashMap::new());
 }
 
+/// Stops `WM_CHAR` text from reaching a terminal, while a text box (tab rename) has the keyboard.
+pub fn suspend_text_routing() {
+    KEY_TARGET.with(|target| target.set(None));
+}
+
+/// The live view for a terminal, if it still exists.
+pub fn find(id: TerminalId) -> Option<Rc<TerminalView>> {
+    VIEWS.with(|views| views.borrow().get(&id).cloned())
+}
+
+/// Forgets a terminal's view; once nothing else holds it the shell is killed.
+pub fn discard(id: TerminalId) {
+    VIEWS.with(|views| views.borrow_mut().remove(&id));
+}
+
 fn with_view(id: TerminalId, action: impl FnOnce(&TerminalView)) {
     let view = VIEWS.with(|views| views.borrow().get(&id).cloned());
     if let Some(view) = view {
@@ -125,7 +140,20 @@ impl TerminalView {
         &self.control
     }
 
+    /// Focuses the control now and again once XAML has laid it out: a view added a moment ago refuses focus until it is in the tree.
     pub fn focus(&self) {
+        self.focus_now();
+        let id = self.id;
+        if let Ok(dispatcher) = DispatcherQueue::GetForCurrentThread() {
+            let handler = DispatcherQueueHandler::new(move || {
+                with_view(id, TerminalView::focus_now);
+                Ok(())
+            });
+            let _ = dispatcher.TryEnqueue(&handler);
+        }
+    }
+
+    fn focus_now(&self) {
         if let Err(error) = self.control.Focus(FocusState::Programmatic) {
             tracing::warn!(terminal_id = %self.id, %error, "could not focus terminal");
         }
@@ -141,6 +169,7 @@ impl TerminalView {
                 with_view(id, |view| view.handle_key_down(args));
             }
         })?);
+        std::mem::forget(self.control.GotFocus(move |_, _| crate::workspace_host::terminal_activated(id))?);
         std::mem::forget(self.control.PointerPressed(move |_, args| {
             if let Some(args) = args.as_ref() {
                 with_view(id, |view| view.handle_pointer_pressed(args));
@@ -228,6 +257,15 @@ impl TerminalView {
         KEY_TARGET.with(|target| target.set(Some(self.id)));
         let Ok(virtual_key) = args.Key() else { return };
         let modifiers = current_modifiers();
+        if crate::workspace_host::handle_shortcut(virtual_key.0, modifiers) {
+            let _ = args.SetHandled(true);
+            return;
+        }
+        if !crate::workspace_host::keyboard_input_enabled(self.id) {
+            // Input is locked for this terminal: swallow typing but leave the window shortcuts above working.
+            let _ = args.SetHandled(true);
+            return;
+        }
         match decide_key_down(virtual_key.0, modifiers) {
             KeyDownAction::Send(key) => {
                 self.send_key(key, modifiers);
@@ -241,10 +279,6 @@ impl TerminalView {
                 self.paste_clipboard();
                 let _ = args.SetHandled(true);
             }
-            KeyDownAction::Window(shortcut) => {
-                crate::drop_down::dispatch_shortcut(shortcut);
-                let _ = args.SetHandled(true);
-            }
             KeyDownAction::Ignore | KeyDownAction::AwaitCharacter => {}
         }
     }
@@ -252,6 +286,9 @@ impl TerminalView {
     /// A UTF-16 unit from the message queue (`WM_CHAR` / `WM_SYSCHAR`): the text the keyboard layout and IME produced.
     fn handle_character_unit(&self, unit: u16) {
         let Some(character) = self.characters.borrow_mut().push(unit) else { return };
+        if !crate::workspace_host::keyboard_input_enabled(self.id) {
+            return;
+        }
         if let Some((key, modifiers)) = text_for_character(character, current_modifiers()) {
             self.send_key(key, modifiers);
         }
@@ -307,6 +344,20 @@ fn request_redraw(id: TerminalId, dispatcher: &DispatcherQueue, pending: &Atomic
     }
 }
 
+/// Runs `action` on the UI thread. The pump threads must never touch XAML or the workspace directly.
+fn run_on_ui_thread(dispatcher: &DispatcherQueue, action: impl FnOnce() + Send + 'static) {
+    let action = std::sync::Mutex::new(Some(action));
+    let handler = DispatcherQueueHandler::new(move || {
+        if let Some(action) = action.lock().ok().and_then(|mut slot| slot.take()) {
+            action();
+        }
+        Ok(())
+    });
+    if !dispatcher.TryEnqueue(&handler).unwrap_or(false) {
+        tracing::warn!("could not queue work on the UI thread");
+    }
+}
+
 fn spawn_event_pump(
     id: TerminalId,
     session: Weak<TerminalSession>,
@@ -320,12 +371,16 @@ fn spawn_event_pump(
             match session.next_event_timeout(EVENT_POLL_INTERVAL) {
                 Some(SessionEvent::Exited(status)) => {
                     tracing::info!(terminal_id = %id, exit_code = ?status.code, "shell exited");
-                    request_redraw(id, &dispatcher, &pending);
+                    run_on_ui_thread(&dispatcher, move || crate::workspace_host::terminal_exited(id));
                     break;
                 }
                 Some(SessionEvent::TitleChanged(title)) => {
                     tracing::debug!(terminal_id = %id, length = title.len(), "terminal title changed");
+                    run_on_ui_thread(&dispatcher, move || crate::workspace_host::terminal_title_changed(id, &title));
                     request_redraw(id, &dispatcher, &pending);
+                }
+                Some(SessionEvent::TitleReset) => {
+                    run_on_ui_thread(&dispatcher, move || crate::workspace_host::terminal_title_changed(id, ""));
                 }
                 Some(_) => request_redraw(id, &dispatcher, &pending),
                 None => {}

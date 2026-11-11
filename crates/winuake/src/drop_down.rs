@@ -19,10 +19,9 @@ use std::time::Instant;
 use windows_core::{BOOL, GUID, IUnknown, Result};
 use winuake_config::window::WindowSettings;
 use winuake_core::drop_down::{
-    DropDownCommand, DropDownController, DropDownEvent, FRAME_INTERVAL, Monitor, PercentStep, PlacementRequest, Point,
-    Rect, SlideFrame, WindowContext, order_monitors, window_rect,
+    DropDownCommand, DropDownController, DropDownEvent, DropDownState, FRAME_INTERVAL, Monitor, PlacementRequest,
+    Point, Rect, SlideFrame, WindowContext, order_monitors, window_rect,
 };
-use winuake_term::keyboard::WindowShortcut;
 
 const TOGGLE_HOTKEY_ID: i32 = 1;
 const VK_F12: u32 = 0x7B;
@@ -164,6 +163,7 @@ impl DropDownHost {
             DropDownCommand::PositionWindow(frame) => self.position(frame),
             DropDownCommand::ShowWindow => unsafe {
                 tracing::info!("showing drop-down window");
+                crate::workspace_host::ensure_session();
                 let _ = ShowWindow(self.window, SW_SHOWNOACTIVATE);
             },
             DropDownCommand::HideWindow => self.hide_now(),
@@ -397,14 +397,33 @@ pub fn toggle() {
     with_host(DropDownHost::toggle);
 }
 
-/// Window-level keyboard shortcuts (resize, full screen, quit) from the terminal view.
-pub fn dispatch_shortcut(shortcut: WindowShortcut) {
-    with_host(|host| match shortcut {
-        WindowShortcut::IncreaseWidth => host.dispatch(DropDownEvent::AdjustWidth(PercentStep::Increase)),
-        WindowShortcut::DecreaseWidth => host.dispatch(DropDownEvent::AdjustWidth(PercentStep::Decrease)),
-        WindowShortcut::IncreaseHeight => host.dispatch(DropDownEvent::AdjustHeight(PercentStep::Increase)),
-        WindowShortcut::DecreaseHeight => host.dispatch(DropDownEvent::AdjustHeight(PercentStep::Decrease)),
-        WindowShortcut::ToggleFullscreen => host.dispatch(DropDownEvent::ToggleFullscreen),
-        WindowShortcut::Quit => crate::application::quit(),
+/// Sends an event to the drop-down controller from anywhere on the UI thread (window actions, shortcuts).
+pub fn dispatch(event: DropDownEvent) {
+    with_host(|host| host.dispatch(event));
+}
+
+/// Ported from `MainWindow::handleLastTabClosed`: retract, but only if the window is showing.
+pub fn retract_if_visible() {
+    with_host(|host| {
+        let state = host.controller.borrow().state();
+        if matches!(state, DropDownState::Open | DropDownState::Opening) {
+            host.toggle();
+        }
+    });
+}
+
+/// Whether the window stays open when it loses focus.
+pub fn keep_open() -> bool {
+    let mut keep_open = true;
+    with_host(|host| keep_open = host.controller.borrow().settings().keep_open);
+    keep_open
+}
+
+/// The `keep-open` action: flips the setting (live only until the settings file exists in Phase 5).
+pub fn toggle_keep_open() {
+    with_host(|host| {
+        let mut settings = host.controller.borrow().settings().clone();
+        settings.keep_open = !settings.keep_open;
+        host.dispatch(DropDownEvent::SettingsChanged(settings));
     });
 }
