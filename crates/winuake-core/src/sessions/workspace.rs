@@ -98,6 +98,28 @@ pub enum QuitCheck {
     },
 }
 
+/// Which terminal a scripted split applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitTarget {
+    /// The active terminal of this session.
+    SessionActive(SessionId),
+    Terminal(TerminalId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitHow {
+    LeftRight,
+    TopBottom,
+    Auto,
+}
+
+/// A split's effects and the id of the new terminal, if one was made.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SplitOutcome {
+    pub effects: Vec<WorkspaceEffect>,
+    pub terminal: Option<TerminalId>,
+}
+
 /// Pixel geometry of the area holding the panes, needed for decisions that depend on size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaneGeometry {
@@ -408,6 +430,78 @@ impl Workspace {
             effects.push(WorkspaceEffect::ActiveTitleChanged { title });
         }
         effects
+    }
+
+    // ---- operations addressed by id (scripting) ----
+
+    /// Splits a terminal chosen by session (its active terminal) or by terminal id. `how` picks the direction.
+    pub fn split_by_id(&mut self, target: SplitTarget, how: SplitHow, geometry: PaneGeometry) -> SplitOutcome {
+        let (session_id, terminal) = match target {
+            SplitTarget::SessionActive(session) => {
+                (Some(session), self.stack.session(session).and_then(|found| found.active_terminal()))
+            }
+            SplitTarget::Terminal(terminal) => (self.stack.session_for_terminal(terminal), Some(terminal)),
+        };
+        let (Some(session_id), Some(terminal)) = (session_id, terminal) else { return SplitOutcome::default() };
+        let is_active_session = self.stack.active_session_id() == Some(session_id);
+        let Some((session, ids)) = self.stack.session_with_ids(session_id) else { return SplitOutcome::default() };
+        let added = match how {
+            SplitHow::LeftRight => session.split_left_right(Some(terminal), ids),
+            SplitHow::TopBottom => session.split_top_bottom(Some(terminal), ids),
+            SplitHow::Auto => session.split_auto(Some(terminal), geometry.area, geometry.divider, ids),
+        };
+        let Some(added) = added else { return SplitOutcome::default() };
+        let mut effects = vec![
+            WorkspaceEffect::TerminalAdded { session: session_id, terminal: added, working_directory_from: terminal },
+            WorkspaceEffect::LayoutChanged { session: session_id },
+        ];
+        if is_active_session {
+            effects.push(WorkspaceEffect::TerminalFocused { terminal: added });
+        }
+        effects.extend(self.title_effects(session_id));
+        SplitOutcome { effects, terminal: Some(added) }
+    }
+
+    /// `removeTerminal`: closes the terminal unless its session is locked.
+    pub fn remove_terminal(&mut self, terminal: TerminalId) -> Vec<WorkspaceEffect> {
+        let Some(session_id) = self.stack.session_for_terminal(terminal) else { return Vec::new() };
+        if !self.stack.session(session_id).is_some_and(|session| session.closable()) {
+            return Vec::new();
+        }
+        self.close_terminal_in(session_id, Some(terminal))
+    }
+
+    /// `tryGrowTerminal*` for any terminal. `None` when it cannot grow that way.
+    pub fn grow_terminal(
+        &mut self,
+        terminal: TerminalId,
+        direction: GrowthDirection,
+        pixels: i32,
+        geometry: PaneGeometry,
+    ) -> Option<i32> {
+        let session_id = self.stack.session_for_terminal(terminal)?;
+        let session = self.stack.session_mut(session_id)?;
+        session.try_grow_terminal(terminal, direction, pixels, geometry.area, geometry.divider, geometry.minimum_extent)
+    }
+
+    /// Sets a switch on one terminal, or on every terminal of the session when `terminal` is `None`.
+    pub fn set_switch(
+        &mut self,
+        session: SessionId,
+        terminal: Option<TerminalId>,
+        switch: TerminalSwitch,
+        enabled: bool,
+    ) {
+        if let Some(target) = self.stack.session_mut(session) {
+            target.set_switch(switch, terminal, enabled);
+        }
+    }
+
+    /// `setTabTitle`. A script title is interactive by default, which pins it against dynamic titles.
+    pub fn set_tab_title(&mut self, session: SessionId, title: &str, interactive: bool) -> Vec<WorkspaceEffect> {
+        let source = if interactive { TitleSource::Interactive } else { TitleSource::Automatic };
+        self.tabs.set_title(session, title, source);
+        vec![WorkspaceEffect::TabsChanged]
     }
 
     // ---- session switches ----
@@ -803,5 +897,82 @@ mod tests {
         workspace.add_session(SessionKind::Single);
         workspace.set_session_closable(None, false);
         assert_eq!(workspace.check_quit(), QuitCheck::Confirm { multiple_sessions: false, locked_sessions: true });
+    }
+
+    #[test]
+    fn given_a_background_session_when_splitting_it_by_id_then_the_new_terminal_does_not_steal_focus() {
+        let mut workspace = workspace_with(2);
+        let outcome = workspace.split_by_id(SplitTarget::SessionActive(SessionId(0)), SplitHow::LeftRight, GEOMETRY);
+        assert_eq!(outcome.terminal, Some(TerminalId(2)));
+        assert!(!outcome.effects.iter().any(|effect| matches!(effect, WorkspaceEffect::TerminalFocused { .. })));
+        assert_eq!(workspace.stack().active_session_id(), Some(SessionId(1)));
+        assert_eq!(workspace.stack().session(SessionId(0)).expect("session").terminal_count(), 2);
+    }
+
+    #[test]
+    fn given_the_active_session_when_splitting_a_terminal_by_id_then_the_new_one_is_focused() {
+        let mut workspace = workspace_with(1);
+        let outcome = workspace.split_by_id(SplitTarget::Terminal(TerminalId(0)), SplitHow::TopBottom, GEOMETRY);
+        assert!(outcome.effects.contains(&WorkspaceEffect::TerminalFocused { terminal: TerminalId(1) }));
+        let auto = workspace.split_by_id(SplitTarget::Terminal(TerminalId(1)), SplitHow::Auto, GEOMETRY);
+        assert_eq!(auto.terminal, Some(TerminalId(2)));
+    }
+
+    #[test]
+    fn given_unknown_ids_when_splitting_by_id_then_nothing_happens() {
+        let mut workspace = workspace_with(1);
+        assert_eq!(
+            workspace.split_by_id(SplitTarget::Terminal(TerminalId(9)), SplitHow::LeftRight, GEOMETRY),
+            SplitOutcome::default()
+        );
+        assert_eq!(
+            workspace.split_by_id(SplitTarget::SessionActive(SessionId(9)), SplitHow::LeftRight, GEOMETRY),
+            SplitOutcome::default()
+        );
+    }
+
+    #[test]
+    fn given_a_locked_session_when_removing_a_terminal_by_id_then_it_stays() {
+        let mut workspace = workspace_with(1);
+        workspace.split_left_right();
+        workspace.set_session_closable(None, false);
+        assert!(workspace.remove_terminal(TerminalId(0)).is_empty());
+        workspace.set_session_closable(None, true);
+        assert!(!workspace.remove_terminal(TerminalId(0)).is_empty());
+        assert!(workspace.remove_terminal(TerminalId(0)).is_empty());
+    }
+
+    #[test]
+    fn given_split_terminals_when_growing_one_by_id_then_pixels_are_reported() {
+        let mut workspace = workspace_with(1);
+        workspace.split_left_right();
+        assert_eq!(workspace.grow_terminal(TerminalId(0), GrowthDirection::Right, 30, GEOMETRY), Some(30));
+        assert_eq!(workspace.grow_terminal(TerminalId(9), GrowthDirection::Right, 30, GEOMETRY), None);
+    }
+
+    #[test]
+    fn given_switches_when_set_by_id_then_one_terminal_or_the_whole_session_changes() {
+        let mut workspace = workspace_with(1);
+        workspace.split_left_right();
+        workspace.set_switch(SessionId(0), Some(TerminalId(0)), TerminalSwitch::MonitorSilence, true);
+        let session = workspace.stack().session(SessionId(0)).expect("session");
+        assert!(session.switch_state(TerminalSwitch::MonitorSilence, TerminalId(0)));
+        assert!(!session.switch_state(TerminalSwitch::MonitorSilence, TerminalId(1)));
+        workspace.set_switch(SessionId(0), None, TerminalSwitch::MonitorSilence, true);
+        assert!(workspace.stack().session(SessionId(0)).expect("session").all_enabled(TerminalSwitch::MonitorSilence));
+    }
+
+    #[test]
+    fn given_a_scripted_title_when_set_interactively_then_dynamic_titles_no_longer_replace_it() {
+        let mut workspace = Workspace::new(WorkspaceSettings { dynamic_tab_titles: true, ..Default::default() });
+        workspace.add_session(SessionKind::Single);
+        workspace.set_tab_title(SessionId(0), "deploy", true);
+        workspace.set_terminal_title(TerminalId(0), "vim");
+        assert_eq!(workspace.tabs().title(SessionId(0)), Some("deploy"));
+        workspace.set_tab_title(SessionId(0), "", true);
+        workspace.set_terminal_title(TerminalId(0), "less");
+        assert_eq!(workspace.tabs().title(SessionId(0)), Some("less"));
+        workspace.set_tab_title(SessionId(0), "auto", false);
+        assert_eq!(workspace.tabs().title(SessionId(0)), Some("auto"));
     }
 }

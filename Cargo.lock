@@ -1734,6 +1734,11 @@ dependencies = [
 [[package]]
 name = "winuake-ipc"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "winuake-core",
+]
 
 [[package]]
 name = "winuake-render"
