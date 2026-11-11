@@ -3,7 +3,6 @@
 use crate::activity::{ActivityMonitor, MonitorNotification};
 use crate::emulator::{DEFAULT_SCROLLBACK_LINES, TerminalEmulator, TerminalEvent};
 use crate::pty::{ExitStatus, PtyBackend, PtyControl, PtyError, PtySpawnRequest, TerminalSize};
-use std::fmt;
 use std::io::{self, Read, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -12,14 +11,7 @@ use std::time::{Duration, Instant};
 
 const READ_BUFFER_BYTES: usize = 16 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TerminalId(pub u64);
-
-impl fmt::Display for TerminalId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}", self.0)
-    }
-}
+pub use winuake_core::ids::TerminalId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
