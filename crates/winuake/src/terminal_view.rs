@@ -73,6 +73,8 @@ pub struct TerminalView {
     session: Arc<TerminalSession>,
     render: RefCell<RenderState>,
     scheme: ColorScheme,
+    /// Profile setting: when off the cursor stays solid.
+    cursor_blink: bool,
     characters: RefCell<CharacterAssembler>,
     /// Win32 handle of the application window; owns clipboard operations.
     window_handle: isize,
@@ -93,6 +95,7 @@ impl TerminalView {
         session: TerminalSession,
         font: &FontSpec,
         scheme: ColorScheme,
+        cursor_blink: bool,
         window_handle: isize,
     ) -> Result<Rc<Self>> {
         let id = session.id();
@@ -118,6 +121,7 @@ impl TerminalView {
             session,
             render: RefCell::new(RenderState { renderer, scale: 1.0 }),
             scheme,
+            cursor_blink,
             characters: RefCell::new(CharacterAssembler::default()),
             window_handle,
             selecting: Cell::new(false),
@@ -202,13 +206,15 @@ impl TerminalView {
             Arc::clone(&self.redraw_pending),
             Arc::downgrade(&self.alive),
         );
-        spawn_cursor_blinker(
-            self.id,
-            dispatcher,
-            Arc::clone(&self.cursor_visible),
-            Arc::clone(&self.redraw_pending),
-            Arc::downgrade(&self.alive),
-        );
+        if self.cursor_blink {
+            spawn_cursor_blinker(
+                self.id,
+                dispatcher,
+                Arc::clone(&self.cursor_visible),
+                Arc::clone(&self.redraw_pending),
+                Arc::downgrade(&self.alive),
+            );
+        }
         Ok(())
     }
 

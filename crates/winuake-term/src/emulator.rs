@@ -2,6 +2,7 @@
 
 use crate::input::{InputModes, MouseReporting};
 use crate::pty::TerminalSize;
+use crate::snapshot::CursorStyle;
 use crate::snapshot::{self, ScreenSnapshot};
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
@@ -109,8 +110,23 @@ pub struct TerminalEmulator {
 
 impl TerminalEmulator {
     pub fn new(size: TerminalSize, scrollback_lines: usize) -> Self {
+        Self::with_cursor(size, scrollback_lines, CursorStyle::Block)
+    }
+
+    /// `default_cursor` is the shape shown until a program asks for another (DECSCUSR); `Block` is the usual default.
+    pub fn with_cursor(size: TerminalSize, scrollback_lines: usize, default_cursor: CursorStyle) -> Self {
         let (sender, events) = mpsc::channel();
-        let config = Config { scrolling_history: scrollback_lines, ..Config::default() };
+        let shape = match default_cursor {
+            CursorStyle::Underline => alacritty_terminal::vte::ansi::CursorShape::Underline,
+            CursorStyle::Beam => alacritty_terminal::vte::ansi::CursorShape::Beam,
+            CursorStyle::HollowBlock => alacritty_terminal::vte::ansi::CursorShape::HollowBlock,
+            CursorStyle::Block => alacritty_terminal::vte::ansi::CursorShape::Block,
+        };
+        let config = Config {
+            scrolling_history: scrollback_lines,
+            default_cursor_style: alacritty_terminal::vte::ansi::CursorStyle { shape, blinking: false },
+            ..Config::default()
+        };
         let term = Term::new(config, &GridDimensions::from(size), EventForwarder { sender });
         Self { term, processor: Processor::new(), events }
     }
@@ -272,6 +288,28 @@ mod tests {
 
     fn emulator(columns: u16, rows: u16) -> TerminalEmulator {
         TerminalEmulator::new(TerminalSize::new(columns, rows), 100)
+    }
+
+    #[test]
+    fn given_a_profile_cursor_shape_when_nothing_overrides_it_then_the_snapshot_uses_it() {
+        let terminal = TerminalEmulator::with_cursor(TerminalSize::new(10, 3), 100, CursorStyle::Underline);
+        assert_eq!(terminal.snapshot().cursor.map(|cursor| cursor.style), Some(CursorStyle::Underline));
+        let beam = TerminalEmulator::with_cursor(TerminalSize::new(10, 3), 100, CursorStyle::Beam);
+        assert_eq!(beam.snapshot().cursor.map(|cursor| cursor.style), Some(CursorStyle::Beam));
+    }
+
+    #[test]
+    fn given_a_program_that_sets_the_cursor_when_it_runs_then_the_profile_default_is_overridden() {
+        let mut terminal = TerminalEmulator::with_cursor(TerminalSize::new(10, 3), 100, CursorStyle::Underline);
+        terminal.advance(b"\x1b[2 q");
+        assert_eq!(terminal.snapshot().cursor.map(|cursor| cursor.style), Some(CursorStyle::Block));
+    }
+
+    #[test]
+    fn given_a_small_scrollback_when_more_lines_scroll_off_then_only_that_many_are_kept() {
+        let mut terminal = TerminalEmulator::new(TerminalSize::new(10, 2), 3);
+        terminal.advance(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n");
+        assert_eq!(terminal.scrollback_line_count(), 3);
     }
 
     #[test]

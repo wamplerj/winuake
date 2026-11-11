@@ -3,6 +3,7 @@
 use crate::activity::{ActivityMonitor, MonitorNotification};
 use crate::emulator::{DEFAULT_SCROLLBACK_LINES, TerminalEmulator, TerminalEvent};
 use crate::pty::{ExitStatus, PtyBackend, PtyControl, PtyError, PtySpawnRequest, TerminalSize};
+use crate::snapshot::CursorStyle;
 use std::io::{self, Read, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -12,6 +13,19 @@ use std::time::{Duration, Instant};
 const READ_BUFFER_BYTES: usize = 16 * 1024;
 
 pub use winuake_core::ids::TerminalId;
+
+/// Per-terminal behavior from the profile.
+#[derive(Debug, Clone, Copy)]
+pub struct SessionOptions {
+    pub scrollback_lines: usize,
+    pub cursor: CursorStyle,
+}
+
+impl Default for SessionOptions {
+    fn default() -> Self {
+        Self { scrollback_lines: DEFAULT_SCROLLBACK_LINES, cursor: CursorStyle::Block }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
@@ -40,13 +54,22 @@ pub struct TerminalSession {
 
 impl TerminalSession {
     pub fn start(id: TerminalId, backend: &dyn PtyBackend, request: &PtySpawnRequest) -> Result<Self, PtyError> {
+        Self::start_with_options(id, backend, request, &SessionOptions::default())
+    }
+
+    pub fn start_with_options(
+        id: TerminalId,
+        backend: &dyn PtyBackend,
+        request: &PtySpawnRequest,
+        options: &SessionOptions,
+    ) -> Result<Self, PtyError> {
         tracing::info!(terminal_id = %id, columns = request.size.columns, rows = request.size.rows, "starting terminal session");
         let connection = backend
             .spawn(request)
             .inspect_err(|error| tracing::error!(terminal_id = %id, %error, "failed to spawn shell"))?;
 
         let shared = Arc::new(SessionShared {
-            emulator: Mutex::new(TerminalEmulator::new(request.size, DEFAULT_SCROLLBACK_LINES)),
+            emulator: Mutex::new(TerminalEmulator::with_cursor(request.size, options.scrollback_lines, options.cursor)),
             writer: Mutex::new(connection.writer),
             control: connection.control,
             monitor: Mutex::new(ActivityMonitor::default()),

@@ -15,6 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use windows_core::{HSTRING, Interface, Result};
+use winuake_config::profile::{CursorShapeSetting, Profile};
 use winuake_config::settings::Settings;
 use winuake_core::actions::{Action, ShortcutMap};
 use winuake_core::drop_down::{DropDownEvent, PercentStep};
@@ -27,11 +28,13 @@ use winuake_core::sessions::workspace::{
 use winuake_core::shortcut::{Chord, ChordModifiers};
 use winuake_render::color::ColorScheme;
 use winuake_render::gpu::FontSpec;
+use winuake_render::scheme_catalog::{self, NamedScheme, find as find_scheme};
 use winuake_term::conpty::ConPtyBackend;
 use winuake_term::input::Modifiers;
 use winuake_term::pty::{EnvironmentVariable, PtySpawnRequest, TerminalSize};
-use winuake_term::session::TerminalSession;
+use winuake_term::session::{SessionOptions, TerminalSession};
 use winuake_term::shell::{PathVariableLocator, ShellResolver};
+use winuake_term::snapshot::CursorStyle;
 
 /// Thickness of the draggable divider between split panes, in DIPs.
 const DIVIDER_THICKNESS: i32 = 4;
@@ -69,8 +72,8 @@ pub struct WorkspaceHost {
     window_handle: isize,
     content: ContentControl,
     sessions: RefCell<HashMap<SessionId, SessionView>>,
-    font: FontSpec,
-    scheme: ColorScheme,
+    profile: RefCell<Profile>,
+    schemes: RefCell<Vec<NamedScheme>>,
     chrome: Chrome,
 }
 
@@ -85,8 +88,8 @@ impl WorkspaceHost {
             window_handle,
             content,
             sessions: RefCell::new(HashMap::new()),
-            font: FontSpec::default(),
-            scheme: ColorScheme::campbell(),
+            profile: RefCell::new(settings.active_profile()),
+            schemes: RefCell::new(load_schemes()),
             chrome,
         });
         HOST.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&host)));
@@ -194,9 +197,12 @@ impl WorkspaceHost {
     }
 
     fn start_terminal(&self, session: SessionId, terminal: TerminalId) -> Result<()> {
-        let started = start_shell(terminal)?;
+        let profile = self.profile.borrow().clone();
+        let started = start_shell(terminal, &profile)?;
         let title = started.title;
-        let view = TerminalView::create(started.session, &self.font, self.scheme.clone(), self.window_handle)?;
+        let font = FontSpec { family: profile.font_family.clone(), size_points: profile.font_size_points };
+        let scheme = self.scheme_for(&profile);
+        let view = TerminalView::create(started.session, &font, scheme, profile.cursor_blink, self.window_handle)?;
         let sessions = self.sessions.borrow();
         let Some(session_view) = sessions.get(&session) else { return Ok(()) };
         let element = view.element();
@@ -207,6 +213,17 @@ impl WorkspaceHost {
         let changed = self.workspace.borrow_mut().set_terminal_title(terminal, &title);
         self.apply(changed);
         Ok(())
+    }
+
+    fn scheme_for(&self, profile: &Profile) -> ColorScheme {
+        let schemes = self.schemes.borrow();
+        match find_scheme(&schemes, &profile.color_scheme) {
+            Some(found) => found.scheme.clone(),
+            None => {
+                tracing::warn!(scheme = %profile.color_scheme, "unknown color scheme; using Campbell");
+                ColorScheme::campbell()
+            }
+        }
     }
 
     // ---- layout ----
@@ -446,6 +463,8 @@ pub fn apply_settings(settings: &Settings) {
     let effects = host.workspace.borrow_mut().apply_settings(workspace_settings(settings));
     host.apply(effects);
     *host.shortcuts.borrow_mut() = shortcut_map(settings);
+    *host.profile.borrow_mut() = settings.active_profile();
+    *host.schemes.borrow_mut() = load_schemes();
     host.chrome.apply_bar_visibility(&settings.window);
 }
 
@@ -759,24 +778,66 @@ struct StartedShell {
     title: String,
 }
 
-fn start_shell(id: TerminalId) -> Result<StartedShell> {
+fn start_shell(id: TerminalId, profile: &Profile) -> Result<StartedShell> {
     let path = std::env::var_os("PATH").unwrap_or_default();
-    let shell = ShellResolver::new(PathVariableLocator::from_path_variable(&path), std::env::var("COMSPEC").ok())
-        .resolve_default_shell();
-    let title = std::path::Path::new(&shell.program)
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let default_shell =
+        ShellResolver::new(PathVariableLocator::from_path_variable(&path), std::env::var("COMSPEC").ok())
+            .resolve_default_shell();
+    let (program, arguments) = match &profile.program {
+        Some(program) => (program.clone(), profile.arguments.clone()),
+        None => (default_shell.program, default_shell.arguments),
+    };
+    let title =
+        std::path::Path::new(&program).file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+    let working_directory = profile
+        .working_directory
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(Into::into));
     let request = PtySpawnRequest {
-        program: shell.program,
-        arguments: shell.arguments,
-        working_directory: std::env::var_os("USERPROFILE").map(Into::into),
+        program,
+        arguments,
+        working_directory,
         environment: vec![EnvironmentVariable { name: "COLORTERM".to_owned(), value: "truecolor".to_owned() }],
         size: TerminalSize::new(80, 24),
     };
-    let session = TerminalSession::start(id, &ConPtyBackend, &request).map_err(|error| {
+    let options = SessionOptions {
+        scrollback_lines: profile.scrollback_lines as usize,
+        cursor: match profile.cursor_shape {
+            CursorShapeSetting::Block => CursorStyle::Block,
+            CursorShapeSetting::Underline => CursorStyle::Underline,
+            CursorShapeSetting::Bar => CursorStyle::Beam,
+        },
+    };
+    let session = TerminalSession::start_with_options(id, &ConPtyBackend, &request, &options).map_err(|error| {
         tracing::error!(terminal_id = %id, %error, "could not start the shell");
         windows_core::Error::new(windows_core::HRESULT(0x8000_4005_u32 as i32), error.to_string())
     })?;
     Ok(StartedShell { session, title })
+}
+
+/// Built-in color schemes plus any `.json` (Windows Terminal) or `.colorscheme` (Konsole) files in `%APPDATA%\Winuake\schemes`.
+fn load_schemes() -> Vec<NamedScheme> {
+    let mut imported = Vec::new();
+    let directory =
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from).map(|base| base.join("Winuake").join("schemes"));
+    if let Some(entries) = directory.and_then(|directory| std::fs::read_dir(directory).ok()) {
+        for path in entries.flatten().map(|entry| entry.path()) {
+            let extension = path.extension().map(|extension| extension.to_string_lossy().to_ascii_lowercase());
+            let stem = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            let result = match extension.as_deref() {
+                Some("json") => scheme_catalog::from_windows_terminal_json(&text),
+                Some("colorscheme") => {
+                    scheme_catalog::from_konsole_colorscheme(&text, &stem).map(|scheme| vec![scheme])
+                }
+                _ => continue,
+            };
+            match result {
+                Ok(mut schemes) => imported.append(&mut schemes),
+                Err(error) => tracing::warn!(file = %path.display(), %error, "could not import a color scheme"),
+            }
+        }
+    }
+    scheme_catalog::catalog(imported)
 }
