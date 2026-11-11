@@ -4,5 +4,6 @@
 pub mod actions;
 pub mod drop_down;
 pub mod ids;
+pub mod notifications;
 pub mod sessions;
 pub mod shortcut;

@@ -22,6 +22,8 @@ mod drop_down;
 #[cfg(windows)]
 mod first_run;
 #[cfg(windows)]
+mod flashes;
+#[cfg(windows)]
 mod message_hook;
 #[cfg(windows)]
 mod settings_store;

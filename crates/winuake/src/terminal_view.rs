@@ -140,6 +140,16 @@ impl TerminalView {
         Ok(view)
     }
 
+    pub fn set_monitoring(&self, activity: bool, silence: bool) {
+        self.session.set_monitoring_activity(activity);
+        self.session.set_monitoring_silence(silence);
+    }
+
+    /// The user looked at this terminal: the next output counts as new activity.
+    pub fn acknowledge_monitor(&self) {
+        self.session.acknowledge_monitor();
+    }
+
     pub fn element(&self) -> &ContentControl {
         &self.control
     }
@@ -277,6 +287,9 @@ impl TerminalView {
         }
         if !crate::workspace_host::keyboard_input_enabled(self.id) {
             // Input is locked for this terminal: swallow typing but leave the window shortcuts above working.
+            if !modifiers.control && !modifiers.alt && !modifiers.shift {
+                crate::workspace_host::indicate_blocked_input(self.id);
+            }
             let _ = args.SetHandled(true);
             return;
         }
@@ -382,6 +395,17 @@ fn spawn_event_pump(
     let spawned = thread::Builder::new().name(format!("terminal-{id}-events")).spawn(move || {
         while alive.upgrade().is_some() {
             let Some(session) = session.upgrade() else { break };
+            if let Some(notification) = session.poll_monitor_notification(std::time::Instant::now()) {
+                let kind = match notification {
+                    winuake_term::activity::MonitorNotification::ActivityDetected => {
+                        winuake_core::notifications::MonitorKind::Activity
+                    }
+                    winuake_term::activity::MonitorNotification::SilenceDetected => {
+                        winuake_core::notifications::MonitorKind::Silence
+                    }
+                };
+                run_on_ui_thread(&dispatcher, move || crate::workspace_host::terminal_monitor_event(id, kind));
+            }
             match session.next_event_timeout(EVENT_POLL_INTERVAL) {
                 Some(SessionEvent::Exited(status)) => {
                     tracing::info!(terminal_id = %id, exit_code = ?status.code, "shell exited");

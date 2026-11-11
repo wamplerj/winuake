@@ -193,6 +193,10 @@ const RENDER_FILTERS: &[&str] = &[
 
 /// Win32 window management used by the drop-down host in `winuake`.
 const WINDOW_FILTERS: &[&str] = &[
+    "NIF_INFO",
+    "NIM_MODIFY",
+    "NIIF_INFO",
+    "NIIF_NOSOUND",
     "GetOpenFileNameW",
     "OPENFILENAMEW",
     "OFN_FILEMUSTEXIST",

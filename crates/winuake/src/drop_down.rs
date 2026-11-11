@@ -461,6 +461,20 @@ pub fn set_height_from_pointer() {
     }
 }
 
+/// True while the window is open or sliding open.
+pub fn is_open() -> bool {
+    let mut open = false;
+    with_host(|host| open = matches!(host.controller.borrow().state(), DropDownState::Open | DropDownState::Opening));
+    open
+}
+
+/// True when the drop-down is the foreground window.
+pub fn window_has_focus() -> bool {
+    let mut focused = false;
+    with_host(|host| focused = unsafe { GetForegroundWindow() } == host.window);
+    focused
+}
+
 /// Whether the window stays open when it loses focus.
 pub fn keep_open() -> bool {
     let mut keep_open = true;

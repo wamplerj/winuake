@@ -116,6 +116,25 @@ fn add_icon() {
     }
 }
 
+/// Shows a balloon (a toast on Windows 11) from the tray icon. Needs the icon to be shown; returns false when it is not.
+pub fn notify(title: &str, text: &str) -> bool {
+    use crate::window_bindings::{NIF_INFO, NIIF_INFO, NIM_MODIFY};
+    let Some(window) = WINDOW.with(Cell::get) else { return false };
+    if !ICON_SHOWN.with(Cell::get) {
+        return false;
+    }
+    let mut data = icon_data(window);
+    data.uFlags = NIF_INFO as u32;
+    data.dwInfoFlags = NIIF_INFO as u32;
+    for (slot, unit) in data.szInfoTitle.iter_mut().zip(title.encode_utf16().take(63).chain(std::iter::once(0))) {
+        *slot = unit;
+    }
+    for (slot, unit) in data.szInfo.iter_mut().zip(text.encode_utf16().take(255).chain(std::iter::once(0))) {
+        *slot = unit;
+    }
+    unsafe { Shell_NotifyIconW(NIM_MODIFY as u32, &data) }.as_bool()
+}
+
 fn delete_icon() {
     if let Some(window) = WINDOW.with(Cell::get) {
         let _ = unsafe { Shell_NotifyIconW(NIM_DELETE as u32, &icon_data(window)) };

@@ -227,6 +227,52 @@ impl WorkspaceHost {
         }
     }
 
+    /// Pushes each terminal's monitor switches from the workspace state into its session.
+    pub fn sync_monitoring(&self) {
+        let workspace = self.workspace.borrow();
+        for terminal in workspace.stack().terminal_ids() {
+            let Some(session) =
+                workspace.stack().session_for_terminal(terminal).and_then(|id| workspace.stack().session(id))
+            else {
+                continue;
+            };
+            if let Some(view) = terminal_view::find(terminal) {
+                view.set_monitoring(
+                    session.switch_state(TerminalSwitch::MonitorActivity, terminal),
+                    session.switch_state(TerminalSwitch::MonitorSilence, terminal),
+                );
+            }
+        }
+    }
+
+    /// Covers a terminal's pane with a translucent rectangle for `duration_ms` (the blocked-input indicator, the activation highlight).
+    pub fn flash_terminal(&self, terminal: TerminalId, color: &str, opacity: f64, duration_ms: u32) {
+        let area = self.content_area();
+        let (session_id, rect) = {
+            let workspace = self.workspace.borrow();
+            let Some(session_id) = workspace.stack().session_for_terminal(terminal) else { return };
+            let Some(session) = workspace.stack().session(session_id) else { return };
+            let panes = session.tree().layout(area, DIVIDER_THICKNESS);
+            let Some(pane) = panes.into_iter().find(|pane| pane.terminal == terminal) else { return };
+            (session_id, pane.rect)
+        };
+        let sessions = self.sessions.borrow();
+        let Some(session_view) = sessions.get(&session_id) else { return };
+        let result = (|| -> Result<()> {
+            let markup = format!(
+                r#"<Rectangle xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Fill="{color}" Opacity="{opacity}" IsHitTestVisible="False" HorizontalAlignment="Left" VerticalAlignment="Top"/>"#
+            );
+            let overlay: FrameworkElement = XamlReader::Load(&HSTRING::from(markup))?.cast()?;
+            place(&overlay, rect);
+            session_view.grid.Children()?.Append(&overlay.cast::<UIElement>()?)?;
+            crate::flashes::track(session_view.grid.clone(), overlay.cast()?, duration_ms);
+            Ok(())
+        })();
+        if let Err(error) = result {
+            tracing::warn!(%error, "could not flash a terminal");
+        }
+    }
+
     // ---- layout ----
 
     fn content_area(&self) -> PaneRect {
@@ -369,9 +415,11 @@ impl WorkspaceHost {
             }
             Action::ToggleSessionMonitorActivity => {
                 self.workspace.borrow_mut().toggle_session_switch(None, TerminalSwitch::MonitorActivity);
+                self.sync_monitoring();
             }
             Action::ToggleSessionMonitorSilence => {
                 self.workspace.borrow_mut().toggle_session_switch(None, TerminalSwitch::MonitorSilence);
+                self.sync_monitoring();
             }
             Action::ToggleTitlebar => self.chrome.toggle_title_bar(),
             Action::SwitchToSession(number) => {
@@ -551,6 +599,7 @@ pub fn toggle_prevent_closing(session: SessionId) {
 pub fn toggle_switch(session: SessionId, switch: TerminalSwitch) {
     if let Some(host) = host() {
         host.workspace.borrow_mut().toggle_session_switch(Some(session), switch);
+        host.sync_monitoring();
     }
 }
 
@@ -621,10 +670,50 @@ pub fn keyboard_input_enabled(terminal: TerminalId) -> bool {
 
 /// A terminal gained keyboard focus.
 pub fn terminal_activated(terminal: TerminalId) {
+    if let Some(view) = terminal_view::find(terminal) {
+        view.acknowledge_monitor();
+    }
     if let Some(host) = host() {
         let effects = host.workspace.borrow_mut().activate_terminal(terminal);
         host.apply(effects);
     }
+}
+
+/// A monitored terminal got output or went quiet: tell the user unless they are already watching it.
+pub fn terminal_monitor_event(terminal: TerminalId, kind: winuake_core::notifications::MonitorKind) {
+    let Some(host) = host() else { return };
+    let (tab_title, is_active) = {
+        let workspace = host.workspace.borrow();
+        let Some(session_id) = workspace.stack().session_for_terminal(terminal) else { return };
+        let title = workspace.tabs().title(session_id).unwrap_or_default().to_owned();
+        let active = workspace.stack().active_session_id() == Some(session_id)
+            && workspace.stack().session(session_id).and_then(|session| session.active_terminal()) == Some(terminal);
+        (title, active)
+    };
+    let watching = winuake_core::notifications::user_is_watching(
+        crate::drop_down::is_open(),
+        crate::drop_down::window_has_focus(),
+        is_active,
+    );
+    tracing::info!(terminal_id = %terminal, ?kind, watching, "monitored terminal event");
+    if !watching {
+        let text = winuake_core::notifications::notification_text(kind, &tab_title);
+        if !crate::tray::notify("Winuake", &text) {
+            tracing::warn!("a notification was due but the tray icon is hidden");
+        }
+    }
+}
+
+/// Typing into a locked terminal: flash the blocked-input indicator over it.
+pub fn indicate_blocked_input(terminal: TerminalId) {
+    let Some(host) = host() else { return };
+    let appearance = crate::settings_store::current().appearance;
+    host.flash_terminal(
+        terminal,
+        &appearance.keyboard_input_block_indicator_color,
+        appearance.keyboard_input_block_indicator_opacity,
+        appearance.keyboard_input_block_indicator_duration_ms,
+    );
 }
 
 pub fn terminal_title_changed(terminal: TerminalId, title: &str) {
