@@ -12,34 +12,34 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | Window | Position | done | 3 |  |
 | Window | ShowOnAllDesktops | partial | 3 | No public pin API: the window is moved to the current virtual desktop when opened instead |
 | Window | KeepOpen | done | 3 | Retract on focus loss when off; the title bar toggle button comes with Phase 4/6 |
-| Window | KeepOpenAfterLastSessionCloses | partial | 4 | Logic done; default only until settings persist (phase 5) |
+| Window | KeepOpenAfterLastSessionCloses | done | 5 | |
 | Window | ToggleToFocus | done | 3 |  |
 | Window | KeepAbove | done | 3 | Topmost when `!KeepOpen \|\| KeepAbove` |
-| Window | ShowTitleBar | todo | | |
-| Window | ShowTabBar | todo | | |
-| Window | DynamicTabTitles | partial | 4 | Logic done and tested; default off until settings persist (phase 5) |
+| Window | ShowTitleBar | done | 5 | Toggle with Ctrl+Shift+M; saved |
+| Window | ShowTabBar | done | 5 | Settings window |
+| Window | DynamicTabTitles | done | 5 | Applies live |
 | Window | ShowSystrayIcon | done | 3 | Stock icon until Phase 9 assets; left click toggles, right click menu |
-| Behavior | FocusFollowsMouse | todo | | |
+| Behavior | FocusFollowsMouse | partial | 5 | Stored and editable; behavior in phase 7 |
 | Behavior | OpenAfterStart | done | 3 |  |
 | Behavior | RememberFullscreen | done | 3 |  |
-| Appearance | Skin | todo | | |
-| Appearance | SkinInstalledWithKns | todo | | |
-| Appearance | Translucency | todo | | |
-| Appearance | BackgroundColor | todo | | |
-| Appearance | BackgroundColorOpacity | todo | | |
-| Appearance | TerminalHighlightOnManualActivation | todo | | |
-| Appearance | HideSkinBorders | todo | | |
-| Appearance | TerminalHighlightOpacity | todo | | |
-| Appearance | TerminalHighlightDuration | todo | | |
-| Appearance | KeyboardInputBlockIndicatorColor | todo | | |
-| Appearance | KeyboardInputBlockIndicatorOpacity | todo | | |
-| Appearance | KeyboardInputBlockIndicatorDuration | todo | | |
+| Appearance | Skin | partial | 5 | Stored and editable; effect in phase 6 |
+| Appearance | SkinInstalledWithKns | partial | 5 | Stored and editable; effect in phase 6 |
+| Appearance | Translucency | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | BackgroundColor | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | BackgroundColorOpacity | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | TerminalHighlightOnManualActivation | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | HideSkinBorders | partial | 5 | Stored and editable; effect in phase 6 |
+| Appearance | TerminalHighlightOpacity | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | TerminalHighlightDuration | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | KeyboardInputBlockIndicatorColor | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | KeyboardInputBlockIndicatorOpacity | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | KeyboardInputBlockIndicatorDuration | partial | 5 | Stored and editable; effect in phase 7 |
 | Animation | UseWMAssist | n/a |  | KWin effect; the Windows slide uses a clipped window region |
 | Animation | Frames | done | 3 | 10 ms per frame, linear, 0 = instant |
-| AutoOpen | PollMouse | todo | | |
-| AutoOpen | PollInterval | todo | | |
-| Dialogs | FirstRun | todo | | |
-| Dialogs | ConfirmQuit | partial | 4 | Dialog works; default only until settings persist (phase 5) |
+| AutoOpen | PollMouse | partial | 5 | Stored and editable; behavior in phase 7 |
+| AutoOpen | PollInterval | partial | 5 | Stored and editable; behavior in phase 7 |
+| Dialogs | FirstRun | done | 5 | Asks for the global hotkey once; saved as `toggle_hotkey` |
+| Dialogs | ConfirmQuit | done | 5 | |
 
 ## Actions (`mainwindow.cpp`)
 
@@ -49,15 +49,15 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `close-session` | done | 4 | Ctrl+Shift+W, tab ×, middle click, menu |
 | `decrease-window-height` | done | 3 | Alt+Shift+Up |
 | `decrease-window-width` | done | 3 | Alt+Shift+Left |
-| `edit-profile` | partial | 5 | Inert until profiles exist (phase 5) |
+| `edit-profile` | done | 5 | Opens the Profile page of the settings window |
 | `grow-terminal-bottom` | done | 4 | Ctrl+Alt+Down, 10 DIPs |
 | `grow-terminal-left` | done | 4 | Ctrl+Alt+Left, 10 DIPs |
 | `grow-terminal-right` | done | 4 | Ctrl+Alt+Right, 10 DIPs |
 | `grow-terminal-top` | done | 4 | Ctrl+Alt+Up, 10 DIPs |
 | `increase-window-height` | done | 3 | Alt+Shift+Down |
 | `increase-window-width` | done | 3 | Alt+Shift+Right |
-| `keep-open` | done | 4 | Title bar pin and menu; live only until settings persist (phase 5) |
-| `manage-profiles` | partial | 5 | Inert until profiles exist (phase 5) |
+| `keep-open` | done | 4 | Title bar pin and menu; saved |
+| `manage-profiles` | done | 5 | Opens the Profile page of the settings window |
 | `move-session-left` | done | 4 | Ctrl+Shift+Left, tab menu |
 | `move-session-right` | done | 4 | Ctrl+Shift+Right, tab menu |
 | `new-session` | done | 4 | Ctrl+Shift+T, tab bar + |

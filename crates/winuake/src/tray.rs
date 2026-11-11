@@ -22,6 +22,7 @@ const WM_NULL: u32 = 0;
 const TRAY_ICON_ID: u32 = 1;
 const MENU_TOGGLE: usize = 1;
 const MENU_QUIT: usize = 2;
+const MENU_SETTINGS: usize = 3;
 
 thread_local! {
     static WINDOW: Cell<Option<HWND>> = const { Cell::new(None) };
@@ -125,6 +126,7 @@ fn show_menu(window: HWND) {
     unsafe {
         let menu = CreatePopupMenu();
         let _ = AppendMenuW(menu, MF_STRING as u32, MENU_TOGGLE, w!("Open / Retract Winuake"));
+        let _ = AppendMenuW(menu, MF_STRING as u32, MENU_SETTINGS, w!("Settings..."));
         let _ = AppendMenuW(menu, MF_SEPARATOR as u32, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING as u32, MENU_QUIT, w!("Quit Winuake"));
 
@@ -146,6 +148,7 @@ fn show_menu(window: HWND) {
 
         match chosen {
             MENU_TOGGLE => crate::drop_down::toggle(),
+            MENU_SETTINGS => crate::settings_window::open(None),
             MENU_QUIT => crate::workspace_host::request_quit(),
             _ => {}
         }

@@ -314,7 +314,7 @@ impl WorkspaceHost {
             Action::ToggleWindowState => crate::drop_down::toggle(),
             Action::KeepOpen => self.chrome.toggle_keep_open(),
             Action::ManageProfiles | Action::EditProfile => {
-                tracing::info!(action = %action.name(), "profiles arrive with the settings window (phase 5)");
+                crate::settings_window::open(Some(winuake_config::fields::Page::Profile));
             }
             Action::IncreaseWindowWidth => {
                 crate::drop_down::dispatch(DropDownEvent::AdjustWidth(PercentStep::Increase))

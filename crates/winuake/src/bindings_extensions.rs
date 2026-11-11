@@ -10,3 +10,12 @@ impl<TSender: windows_core::RuntimeType + 'static, TResult: windows_core::Runtim
         unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
     }
 }
+
+// `ToggleButton::SetIsChecked` takes `Option<bool>` and converts it with `From<bool> for IReference<bool>`, which bindgen leaves out.
+impl From<bool> for IReference<bool> {
+    fn from(value: bool) -> Self {
+        PropertyValue::CreateBoolean(value)
+            .and_then(|boxed| windows_core::Interface::cast(&boxed))
+            .expect("boxing a bool as IReference<bool> cannot fail")
+    }
+}

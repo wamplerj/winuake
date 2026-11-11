@@ -445,6 +445,8 @@ fn show_tab_menu(session: SessionId) {
 const MAIN_MENU_KEEP_OPEN: usize = 1;
 const MAIN_MENU_TITLEBAR: usize = 2;
 const MAIN_MENU_QUIT: usize = 3;
+const MAIN_MENU_SETTINGS: usize = 4;
+const MAIN_MENU_SHORTCUTS: usize = 5;
 
 /// The title bar's menu button. Yakuake's full menu (settings, skins, help) arrives with the settings window.
 fn show_main_menu() {
@@ -457,11 +459,16 @@ fn show_main_menu() {
         );
         let _ = AppendMenuW(menu, flags(true, false), MAIN_MENU_TITLEBAR, w!("Toggle Titlebar"));
         let _ = AppendMenuW(menu, MF_SEPARATOR as u32, 0, PCWSTR::null());
+        let _ = AppendMenuW(menu, flags(true, false), MAIN_MENU_SETTINGS, w!("Settings..."));
+        let _ = AppendMenuW(menu, flags(true, false), MAIN_MENU_SHORTCUTS, w!("Configure Shortcuts..."));
+        let _ = AppendMenuW(menu, MF_SEPARATOR as u32, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, flags(true, false), MAIN_MENU_QUIT, w!("Quit"));
     });
     match chosen {
         MAIN_MENU_KEEP_OPEN => workspace_host::run_action(Action::KeepOpen),
         MAIN_MENU_TITLEBAR => workspace_host::run_action(Action::ToggleTitlebar),
+        MAIN_MENU_SETTINGS => crate::settings_window::open(None),
+        MAIN_MENU_SHORTCUTS => crate::settings_window::open_shortcuts(),
         MAIN_MENU_QUIT => workspace_host::request_quit(),
         _ => {}
     }

@@ -174,6 +174,14 @@ impl TerminalView {
             }
         })?);
         std::mem::forget(self.control.GotFocus(move |_, _| crate::workspace_host::terminal_activated(id))?);
+        // Text from the message queue belongs to the focused terminal only; once focus leaves, other windows' text boxes get their own.
+        std::mem::forget(self.control.LostFocus(move |_, _| {
+            KEY_TARGET.with(|target| {
+                if target.get() == Some(id) {
+                    target.set(None);
+                }
+            });
+        })?);
         std::mem::forget(self.control.PointerPressed(move |_, args| {
             if let Some(args) = args.as_ref() {
                 with_view(id, |view| view.handle_pointer_pressed(args));
@@ -324,7 +332,7 @@ impl Drop for TerminalView {
 
 windows_core::link!("user32.dll" "system" fn GetKeyState(virtual_key: i32) -> i16);
 
-fn current_modifiers() -> Modifiers {
+pub(crate) fn current_modifiers() -> Modifiers {
     let is_down = |virtual_key: i32| unsafe { GetKeyState(virtual_key) } & KEY_DOWN_BIT != 0;
     Modifiers {
         shift: is_down(keyboard::VK_SHIFT),

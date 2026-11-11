@@ -20,9 +20,13 @@ mod composition;
 #[cfg(windows)]
 mod drop_down;
 #[cfg(windows)]
+mod first_run;
+#[cfg(windows)]
 mod message_hook;
 #[cfg(windows)]
 mod settings_store;
+#[cfg(windows)]
+mod settings_window;
 #[cfg(windows)]
 mod single_instance;
 #[cfg(windows)]

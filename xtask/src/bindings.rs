@@ -44,7 +44,7 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.XamlTypeInfo.XamlControlsXamlMetaDataProvider::CreateInstance",
     "Microsoft.UI.Xaml.XamlTypeInfo.IXamlControlsXamlMetaDataProviderStatics",
     "Microsoft.UI.Xaml.Markup.IXamlMetadataProvider::{GetXamlType, GetXamlTypeByFullName, GetXmlnsDefinitions}",
-    "Windows.Foundation.PropertyValue::CreateString",
+    "Windows.Foundation.PropertyValue::{CreateString, CreateBoolean}",
     "Windows.Foundation.Collections.IVector",
     "Windows.Foundation.Collections.IIterable",
     // Phase 4: tab bar, title bar and split panes are loaded from XAML markup and positioned with margins.
@@ -58,6 +58,13 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.Controls.TextBox::{get_Text, put_Text, SelectAll}",
     "Microsoft.UI.Xaml.Controls.ITextBoxStatics",
     "Microsoft.UI.Xaml.Controls.ITextBoxFactory",
+    // Phase 5: settings window controls.
+    "Microsoft.UI.Xaml.Controls.Primitives.ToggleButton::{get_IsChecked, put_IsChecked}",
+    "Microsoft.UI.Xaml.Controls.Primitives.ButtonBase::add_Click",
+    "Microsoft.UI.Xaml.Controls.Primitives.IToggleButtonFactory",
+    "Microsoft.UI.Xaml.Controls.Primitives.IToggleButtonStatics",
+    "Microsoft.UI.Xaml.Window::{Close, add_Closed}",
+    "Windows.Foundation.IReference",
     "Microsoft.UI.Xaml.IDependencyPropertyStatics",
     "Microsoft.UI.Xaml.IPropertyMetadataFactory",
     "Microsoft.UI.Xaml.IPropertyMetadataStatics",

@@ -116,5 +116,6 @@ fn open_main_window() -> Result<()> {
     }
 
     MAIN_WINDOW.with(|slot| *slot.borrow_mut() = Some(window));
+    crate::first_run::show_if_first_run();
     Ok(())
 }
