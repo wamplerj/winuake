@@ -75,6 +75,14 @@ pub fn order_monitors(mut monitors: Vec<Monitor>) -> Vec<Monitor> {
 }
 
 /// Index into `monitors` (already ordered). `Screen = 0`, or a number past the last screen, means the screen under the pointer.
+/// Window height percent for a title-bar drag: the pointer's distance below the top of the work area as a share of its height, kept
+/// within 10..=100 (Ported from `TitleBar::mouseMoveEvent`).
+pub fn height_percent_for_pointer(pointer_y: i32, work_area: Rect) -> u8 {
+    let height = (work_area.bottom - work_area.top).max(1);
+    let percent = i64::from(pointer_y - work_area.top) * 100 / i64::from(height);
+    percent.clamp(10, 100) as u8
+}
+
 pub fn select_screen(screen_setting: u32, monitors: &[Monitor], pointer: Point) -> usize {
     if screen_setting >= 1 && (screen_setting as usize) <= monitors.len() {
         return screen_setting as usize - 1;
@@ -197,5 +205,19 @@ mod tests {
         assert_eq!(stepped_percent(100, PercentStep::Increase), 100);
         assert_eq!(stepped_percent(20, PercentStep::Decrease), 10);
         assert_eq!(stepped_percent(10, PercentStep::Decrease), 10);
+    }
+
+    #[test]
+    fn given_a_pointer_in_the_work_area_when_dragging_the_title_bar_then_the_height_is_its_share() {
+        let work = Rect::new(0, 40, 1000, 1040);
+        assert_eq!(height_percent_for_pointer(540, work), 50);
+        assert_eq!(height_percent_for_pointer(40 + 333, work), 33);
+    }
+
+    #[test]
+    fn given_a_pointer_outside_the_work_area_when_dragging_then_the_height_is_clamped() {
+        let work = Rect::new(0, 0, 1000, 1000);
+        assert_eq!(height_percent_for_pointer(-50, work), 10);
+        assert_eq!(height_percent_for_pointer(5000, work), 100);
     }
 }

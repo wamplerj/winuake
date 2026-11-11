@@ -2,7 +2,7 @@
 
 Drop-down terminal for Windows 11, a port of [KDE Yakuake](https://github.com/KDE/yakuake). Rust + WinUI 3.
 
-Status: Phase 0 (scaffold). See `docs/plans/winuake-port.md` for the phased plan and `docs/parity.md` for feature parity.
+Status: Phase 6 (skins) done. See `docs/plans/winuake-port.md` for the phased plan and `docs/parity.md` for feature parity.
 
 ## Build
 

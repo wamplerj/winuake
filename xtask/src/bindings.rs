@@ -52,7 +52,7 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.Markup.IXamlReaderStatics",
     "Microsoft.UI.Xaml.FrameworkElement::{FindName, put_Margin}",
     "Microsoft.UI.Xaml.Thickness",
-    "Microsoft.UI.Xaml.UIElement::{put_Visibility, add_GotFocus, add_LostFocus}",
+    "Microsoft.UI.Xaml.UIElement::{put_Visibility, add_GotFocus, add_LostFocus, add_PointerEntered, add_PointerExited}",
     "Microsoft.UI.Xaml.Visibility",
     "Microsoft.UI.Xaml.RoutedEventHandler",
     "Microsoft.UI.Xaml.Controls.TextBox::{get_Text, put_Text, SelectAll}",
@@ -193,6 +193,11 @@ const RENDER_FILTERS: &[&str] = &[
 
 /// Win32 window management used by the drop-down host in `winuake`.
 const WINDOW_FILTERS: &[&str] = &[
+    "GetOpenFileNameW",
+    "OPENFILENAMEW",
+    "OFN_FILEMUSTEXIST",
+    "OFN_PATHMUSTEXIST",
+    "OFN_NOCHANGEDIR",
     "MOD_ALT",
     "MOD_CONTROL",
     "MOD_SHIFT",

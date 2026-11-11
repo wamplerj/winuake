@@ -22,13 +22,13 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | Behavior | FocusFollowsMouse | partial | 5 | Stored and editable; behavior in phase 7 |
 | Behavior | OpenAfterStart | done | 3 |  |
 | Behavior | RememberFullscreen | done | 3 |  |
-| Appearance | Skin | partial | 5 | Stored and editable; effect in phase 6 |
-| Appearance | SkinInstalledWithKns | partial | 5 | Stored and editable; effect in phase 6 |
+| Appearance | Skin | done | 6 | Skins page of the settings window; switches live |
+| Appearance | SkinInstalledWithKns | n/a | 6 | KNewStuff does not exist on Windows; skins install from an archive file instead |
 | Appearance | Translucency | partial | 5 | Stored and editable; effect in phase 7 |
 | Appearance | BackgroundColor | partial | 5 | Stored and editable; effect in phase 7 |
 | Appearance | BackgroundColorOpacity | partial | 5 | Stored and editable; effect in phase 7 |
 | Appearance | TerminalHighlightOnManualActivation | partial | 5 | Stored and editable; effect in phase 7 |
-| Appearance | HideSkinBorders | partial | 5 | Stored and editable; effect in phase 6 |
+| Appearance | HideSkinBorders | done | 6 | |
 | Appearance | TerminalHighlightOpacity | partial | 5 | Stored and editable; effect in phase 7 |
 | Appearance | TerminalHighlightDuration | partial | 5 | Stored and editable; effect in phase 7 |
 | Appearance | KeyboardInputBlockIndicatorColor | partial | 5 | Stored and editable; effect in phase 7 |
@@ -137,4 +137,20 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 
 ## Skin keys (`skin.cpp`, `data/skins/*`)
 
-Populate in Phase 6.
+| Key | Status | Phase | Notes |
+|---|---|---|---|
+| `[Description]` Skin, Author, Email, Icon | done | 6 | Shown in the skin list; an `Icon` naming a missing PNG falls back to the SVG of the same name |
+| `[Border]` red, green, blue, width | done | 6 | Left, right and bottom borders around the terminals; off with `HideSkinBorders` |
+| `[Text]` x, y, red, green, blue, text, bold, centered | done | 6 | Title is `<terminal title> - <text>`; baseline of `y` approximated (about 12 px above) |
+| `[Background]` back_image, left_corner, right_corner (title) | done | 6 | Middle stretched instead of tiled |
+| `[FocusButton]` `[ConfigButton]` `[QuitButton]` x, y, anchor, up/over/down images | done | 6 | Right anchor measures the button's left edge from the right, like Qt |
+| `[Tabs]` x, y, colors, separator, selected/unselected background and corners, selected_text_bold | done | 6 | Tab width follows the text (Qt adds 10 px) |
+| `[Tabs]` prevent_closing_image and its x, y | done | 6 | Drawn on locked tabs |
+| `[Tabs]` compact | partial | 6 | Positions are adjusted as in `skin.cpp`; the tab bar is not inset to the compact left/right (no bundled skin uses it) |
+| `[Background]` back_image, left_corner, right_corner (tabs) | done | 6 | |
+| `[PlusButton]` x, y, images, at_end_of_tabs | done | 6 | |
+| `[MinusButton]` x, y, images | done | 6 | Closes the selected tab |
+| SVG images (default skin) | done | 6 | Rendered at 3x into `%LOCALAPPDATA%\Winuake\skin-cache` |
+| Window masks for rounded skin corners | n/a | 6 | Not ported; corner images are drawn over the window background |
+| Install from `.tar`, `.tar.gz`, `.zip`; remove | done | 6 | Replaces KNewStuff; bzip2 archives are not supported |
+| Title bar drag changes height | done | 6 | |

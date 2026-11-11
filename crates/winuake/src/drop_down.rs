@@ -69,6 +69,8 @@ pub struct DropDownHost {
     focus_timer: Cell<usize>,
     last_focus_state: Cell<Option<(bool, bool)>>,
     toggle_hotkey: RefCell<Option<String>>,
+    /// The last topmost state applied; re-applying it would lift the window above other topmost windows such as the settings window.
+    topmost: Cell<Option<bool>>,
 }
 
 impl DropDownHost {
@@ -95,6 +97,7 @@ impl DropDownHost {
             focus_timer: Cell::new(0),
             last_focus_state: Cell::new(None),
             toggle_hotkey: RefCell::new(toggle_hotkey.map(str::to_owned)),
+            topmost: Cell::new(None),
         });
         host.apply_popup_style();
         HOST.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&host)));
@@ -207,6 +210,7 @@ impl DropDownHost {
             DropDownCommand::HideWindow => self.hide_now(),
             DropDownCommand::ActivateWindow => self.activate(),
             DropDownCommand::MoveToCurrentDesktop => self.move_to_current_desktop(),
+            DropDownCommand::SetTopmost(topmost) if self.topmost.replace(Some(topmost)) == Some(topmost) => {}
             DropDownCommand::SetTopmost(topmost) => unsafe {
                 let order = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
                 let _ = SetWindowPos(
@@ -442,6 +446,19 @@ pub fn retract_if_visible() {
             host.toggle();
         }
     });
+}
+
+/// Title-bar drag: sets the window height from the pointer's vertical position on the screen it is on.
+pub fn set_height_from_pointer() {
+    let monitors = enumerate_monitors();
+    let pointer = cursor_position();
+    let Some(monitor) = monitors.iter().find(|monitor| monitor.bounds.contains(pointer)).or(monitors.first()) else {
+        return;
+    };
+    let percent = winuake_core::drop_down::height_percent_for_pointer(pointer.y, monitor.work_area);
+    if crate::settings_store::current().window.height_percent != percent {
+        crate::settings_store::update(|settings| settings.window.height_percent = percent);
+    }
 }
 
 /// Whether the window stays open when it loses focus.

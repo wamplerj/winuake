@@ -4,7 +4,9 @@
 //! The window is XAML markup with named controls. Text boxes commit when they lose focus; check boxes commit when clicked; shortcut
 //! boxes record the key combination pressed in them.
 
-use crate::bindings::{FrameworkElement, TextBlock, TextBox, ToggleButton, UIElement, Visibility, Window, XamlReader};
+use crate::bindings::{
+    Button, FrameworkElement, Panel, TextBlock, TextBox, ToggleButton, UIElement, Visibility, Window, XamlReader,
+};
 use crate::settings_store;
 use crate::window_bindings::{BringWindowToTop, HWND, HWND_TOPMOST, SWP_NOMOVE, SetForegroundWindow, SetWindowPos};
 use crate::window_native::IWindowNative;
@@ -23,6 +25,8 @@ const DIM: &str = "#FF999999";
 const WINDOW_WIDTH: i32 = 1100;
 const WINDOW_HEIGHT: i32 = 900;
 const SHORTCUTS_PAGE: &str = "Shortcuts";
+const SKINS_PAGE: &str = "Skins";
+const PAGES: [&str; 6] = ["Window", "Behavior", "Appearance", SKINS_PAGE, SHORTCUTS_PAGE, "Profile"];
 
 thread_local! {
     static OPEN: RefCell<Option<Rc<SettingsWindow>>> = const { RefCell::new(None) };
@@ -87,6 +91,11 @@ fn page_markup(page: Page, settings: &Settings) -> String {
     page_wrapper(page.title(), &rows)
 }
 
+fn skins_markup() -> String {
+    let rows = r##"<StackPanel x:Name="SkinList"/><StackPanel Orientation="Horizontal" Margin="0,16,0,0"><Button x:Name="InstallSkinButton" Content="Install skin from file..." /><Button x:Name="RemoveSkinButton" Content="Remove selected skin" Margin="10,0,0,0"/></StackPanel><TextBlock Margin="0,12,0,0" Foreground="#FF999999" FontSize="12" TextWrapping="Wrap" Text="Skins are folders with title.skin and tabs.skin. Install a .zip, .tar or .tar.gz archive that holds one skin folder."/>"##;
+    page_wrapper(SKINS_PAGE, rows)
+}
+
 fn shortcuts_markup(settings: &Settings) -> String {
     let map = ShortcutMap::with_overrides(&settings.shortcuts).map;
     let rows: String = Action::all()
@@ -111,12 +120,7 @@ fn page_wrapper(title: &str, rows: &str) -> String {
 }
 
 fn window_markup(settings: &Settings) -> String {
-    let titles: Vec<&str> = [Page::Window, Page::Behavior, Page::Appearance]
-        .iter()
-        .map(|page| page.title())
-        .chain([SHORTCUTS_PAGE, "Profile"])
-        .collect();
-    let navigation: String = titles
+    let navigation: String = PAGES
         .iter()
         .map(|title| {
             format!(
@@ -127,7 +131,7 @@ fn window_markup(settings: &Settings) -> String {
     let pages: String = [Page::Window, Page::Behavior, Page::Appearance]
         .into_iter()
         .map(|page| page_markup(page, settings))
-        .chain([shortcuts_markup(settings), page_markup(Page::Profile, settings)])
+        .chain([skins_markup(), shortcuts_markup(settings), page_markup(Page::Profile, settings)])
         .collect();
     format!(
         r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Background="#FF202020">
@@ -182,13 +186,17 @@ pub fn open_shortcuts() {
 
 fn create(initial_page: &str) -> Result<Rc<SettingsWindow>> {
     let settings = settings_store::current();
-    let root: FrameworkElement = XamlReader::Load(&HSTRING::from(window_markup(&settings)))?.cast()?;
+    let root: FrameworkElement = XamlReader::Load(&HSTRING::from(window_markup(&settings)))
+        .inspect_err(|error| tracing::error!(%error, "settings window: markup failed"))?
+        .cast()?;
     let window = Window::new()?;
     window.SetTitle(&HSTRING::from("Winuake Settings"))?;
     window.SetContent(&root)?;
     let shown = Rc::new(SettingsWindow { window: window.clone(), root: root.clone() });
-    shown.connect(&settings)?;
-    shown.show_page(initial_page)?;
+    shown.connect(&settings).inspect_err(|error| tracing::error!(%error, "settings window: connect failed"))?;
+    OPEN.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&shown)));
+    refresh_skin_list();
+    shown.show_page(initial_page).inspect_err(|error| tracing::error!(%error, "settings window: show_page failed"))?;
     std::mem::forget(window.Closed(move |_, _| {
         OPEN.with(|slot| slot.borrow_mut().take());
     })?);
@@ -211,7 +219,7 @@ impl SettingsWindow {
     }
 
     fn show_page(&self, name: &str) -> Result<()> {
-        for title in ["Window", "Behavior", "Appearance", SHORTCUTS_PAGE, "Profile"] {
+        for title in PAGES {
             let page: UIElement = find(&self.root, &format!("Page_{title}"))?;
             let visible = title == name;
             page.SetVisibility(if visible { Visibility::Visible } else { Visibility::Collapsed })?;
@@ -227,8 +235,9 @@ impl SettingsWindow {
     }
 
     fn connect(self: &Rc<Self>, settings: &Settings) -> Result<()> {
-        for title in ["Window", "Behavior", "Appearance", SHORTCUTS_PAGE, "Profile"] {
-            let nav: UIElement = find(&self.root, &format!("Nav_{title}"))?;
+        for title in PAGES {
+            let nav: UIElement = find(&self.root, &format!("Nav_{title}"))
+                .inspect_err(|error| tracing::error!(%error, title, "nav find failed"))?;
             let title = title.to_owned();
             std::mem::forget(nav.PointerPressed(move |_, _| {
                 if let Some(window) = OPEN.with(|slot| slot.borrow().clone()) {
@@ -237,12 +246,18 @@ impl SettingsWindow {
             })?);
         }
         for descriptor in fields::descriptors() {
-            self.connect_field(&descriptor)?;
+            self.connect_field(&descriptor)
+                .inspect_err(|error| tracing::error!(%error, key = descriptor.key, "connect_field failed"))?;
         }
         for action in Action::all() {
-            self.connect_shortcut_box(action)?;
+            self.connect_shortcut_box(action)
+                .inspect_err(|error| tracing::error!(%error, action = %action.name(), "connect_shortcut_box failed"))?;
         }
         let _ = settings;
+        let install: Button = find(&self.root, "InstallSkinButton")?;
+        std::mem::forget(install.Click(move |_, _| install_skin_from_file())?);
+        let remove: Button = find(&self.root, "RemoveSkinButton")?;
+        std::mem::forget(remove.Click(move |_, _| remove_selected_skin())?);
         Ok(())
     }
 
@@ -374,4 +389,128 @@ fn refresh_shortcut_boxes(any_box: &TextBox) {
             let _ = text_box.SetText(&HSTRING::from(text));
         }
     }
+}
+
+// ---- skins page ----
+
+fn skin_row_markup(summary: &winuake_skin::directory::SkinSummary, selected: bool) -> String {
+    let background = if selected { "#FF3A4A5A" } else { "#00000000" };
+    let icon = crate::skin_assets::icon_uri(summary)
+        .map(|uri| format!(r#"<Image Source="{uri}" Width="32" Height="32" Margin="0,0,12,0"/>"#))
+        .unwrap_or_else(|| r#"<Border Width="32" Height="32" Margin="0,0,12,0"/>"#.to_owned());
+    let origin = match summary.location {
+        winuake_skin::directory::SkinLocation::User => "installed",
+        winuake_skin::directory::SkinLocation::Bundled => "bundled",
+    };
+    format!(
+        r#"<Border xmlns="{XAML_NAMESPACE}" Background="{background}" Padding="8" Margin="0,4,0,0" CornerRadius="4"><StackPanel Orientation="Horizontal">{icon}<StackPanel><TextBlock Text="{}" Foreground="{TEXT}" FontSize="14"/><TextBlock Text="{}" Foreground="{DIM}" FontSize="12"/></StackPanel></StackPanel></Border>"#,
+        escape(&summary.name),
+        escape(&format!("{} ({origin})", if summary.author.is_empty() { "unknown author" } else { &summary.author })),
+    )
+}
+
+/// Rebuilds the skin rows from what is on disk, highlighting the skin in use.
+fn refresh_skin_list() {
+    let Some(window) = OPEN.with(|slot| slot.borrow().clone()) else { return };
+    let result = (|| -> Result<()> {
+        let list: Panel = find(&window.root, "SkinList")?;
+        let children = list.Children()?;
+        children.Clear()?;
+        let current = settings_store::current().appearance.skin;
+        for summary in crate::skin_assets::list() {
+            let row: FrameworkElement =
+                XamlReader::Load(&HSTRING::from(skin_row_markup(&summary, summary.id == current)))?.cast()?;
+            let id = summary.id.clone();
+            let ui: UIElement = row.cast()?;
+            std::mem::forget(ui.PointerPressed(move |_, _| {
+                let id = id.clone();
+                settings_store::update(move |settings| settings.appearance.skin = id);
+                refresh_skin_list();
+            })?);
+            children.Append(&ui)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        tracing::error!(%error, "could not list skins");
+    }
+}
+
+fn skin_status(message: &str) {
+    if let Some(window) = OPEN.with(|slot| slot.borrow().clone()) {
+        window.set_status(message);
+    }
+}
+
+fn install_skin_from_file() {
+    let Some(path) = pick_archive() else { return };
+    let outcome = (|| -> std::result::Result<String, String> {
+        let bytes = std::fs::read(&path).map_err(|error| format!("cannot read the file: {error}"))?;
+        let archive = winuake_skin::archive::read_archive(&bytes).map_err(|error| error.to_string())?;
+        winuake_skin::directory::install(&archive, &crate::skin_assets::user_skins_directory())
+            .map_err(|error| error.to_string())?;
+        crate::skin_assets::clear_cache(&archive.id);
+        Ok(archive.id)
+    })();
+    match outcome {
+        Ok(id) => {
+            tracing::info!(skin = %id, "skin installed");
+            skin_status("");
+            settings_store::update(move |settings| settings.appearance.skin = id);
+            refresh_skin_list();
+        }
+        Err(message) => {
+            tracing::warn!(%message, "could not install the skin");
+            skin_status(&format!("Install failed: {message}"));
+        }
+    }
+}
+
+fn remove_selected_skin() {
+    let current = settings_store::current().appearance.skin;
+    let installed = crate::skin_assets::list()
+        .into_iter()
+        .find(|summary| summary.id == current && summary.location == winuake_skin::directory::SkinLocation::User);
+    let Some(skin) = installed else {
+        skin_status("Only skins you installed can be removed.");
+        return;
+    };
+    match winuake_skin::directory::remove(&crate::skin_assets::user_skins_directory(), &skin.id) {
+        Ok(()) => {
+            crate::skin_assets::clear_cache(&skin.id);
+            skin_status("");
+            settings_store::update(|settings| settings.appearance.skin = "default".to_owned());
+            refresh_skin_list();
+        }
+        Err(error) => skin_status(&format!("Could not remove the skin: {error}")),
+    }
+}
+
+/// Shows the Windows "open file" dialog for skin archives.
+fn pick_archive() -> Option<std::path::PathBuf> {
+    use crate::window_bindings::{
+        GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
+    };
+    let mut buffer = vec![0u16; 1024];
+    let filter: Vec<u16> = "Skin archives\0*.zip;*.tar;*.tar.gz;*.tgz\0All files\0*.*\0\0".encode_utf16().collect();
+    let title: Vec<u16> = "Install skin\0".encode_utf16().collect();
+    let owner = OPEN
+        .with(|slot| slot.borrow().clone())
+        .and_then(|window| window.window.cast::<IWindowNative>().ok()?.handle().ok());
+    let mut dialog = OPENFILENAMEW {
+        lStructSize: size_of::<OPENFILENAMEW>() as u32,
+        hwndOwner: HWND(owner.unwrap_or(0) as *mut core::ffi::c_void),
+        lpstrFilter: windows_core::PCWSTR(filter.as_ptr()),
+        nFilterIndex: 1,
+        lpstrFile: windows_core::PWSTR(buffer.as_mut_ptr()),
+        nMaxFile: buffer.len() as u32,
+        lpstrTitle: windows_core::PCWSTR(title.as_ptr()),
+        Flags: (OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR) as u32,
+        ..OPENFILENAMEW::default()
+    };
+    if !unsafe { GetOpenFileNameW(&mut dialog) }.as_bool() {
+        return None;
+    }
+    let length = buffer.iter().position(|unit| *unit == 0).unwrap_or(buffer.len());
+    Some(std::path::PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
 }

@@ -99,6 +99,7 @@ impl WorkspaceHost {
             }
         })?);
         host.chrome.connect(&host)?;
+        host.chrome.apply_appearance(settings, &host);
         host.chrome.apply_bar_visibility(&settings.window);
         Ok(host)
     }
@@ -465,6 +466,7 @@ pub fn apply_settings(settings: &Settings) {
     *host.shortcuts.borrow_mut() = shortcut_map(settings);
     *host.profile.borrow_mut() = settings.active_profile();
     *host.schemes.borrow_mut() = load_schemes();
+    host.chrome.apply_appearance(settings, &host);
     host.chrome.apply_bar_visibility(&settings.window);
 }
 
@@ -483,6 +485,14 @@ pub use crate::terminal_view::suspend_text_routing;
 pub fn close_session(session: SessionId) {
     if let Some(host) = host() {
         host.close_session(Some(session));
+    }
+}
+
+/// The skin's close button: closes the selected tab.
+pub fn close_selected_session() {
+    let selected = host().and_then(|host| host.workspace.borrow().tabs().selected());
+    if let Some(session) = selected {
+        close_session(session);
     }
 }
 

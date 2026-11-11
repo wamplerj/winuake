@@ -30,9 +30,15 @@ mod settings_window;
 #[cfg(windows)]
 mod single_instance;
 #[cfg(windows)]
+mod skin_assets;
+#[cfg(windows)]
+mod skin_chrome;
+#[cfg(windows)]
 mod swap_chain_panel_native;
 #[cfg(windows)]
 mod terminal_view;
+#[cfg(windows)]
+mod title_drag;
 #[cfg(windows)]
 mod tray;
 #[cfg(windows)]

@@ -1,20 +1,22 @@
-//! Title bar and tab bar. Ports the structure and behavior of Yakuake `titlebar.cpp` and `tabbar.cpp`; the look is a plain placeholder until
-//! skins arrive in Phase 6.
+//! Title bar, tab bar and window borders. Ports the structure and behavior of Yakuake `titlebar.cpp` and `tabbar.cpp`; the look comes from
+//! the selected skin (`skin_chrome`), with a plain built-in look if no skin loads.
 //!
 //! Both bars are XAML markup loaded at runtime. The tab strip is rebuilt from the workspace whenever it changes, and each tab's handlers
 //! capture only its session id.
 
 use crate::bindings::{
-    ContentControl, FrameworkElement, Grid, Panel, PointerRoutedEventArgs, TextBlock, TextBox, UIElement, Visibility,
-    XamlReader,
+    ContentControl, FrameworkElement, Grid, Panel, PointerRoutedEventArgs, TextBlock, TextBox, Thickness, UIElement,
+    Visibility, XamlReader,
 };
+use crate::skin_assets::AppSkin;
+use crate::skin_chrome::{self, SkinButtonViews, TabLook};
 use crate::window_bindings::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetDoubleClickTime, GetTickCount64, HMENU, HWND, LPARAM,
     MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, POINT, PostMessageW, SetForegroundWindow, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, TrackPopupMenuEx, WPARAM,
 };
 use crate::workspace_host::{self, WorkspaceHost};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use windows_core::{HSTRING, Interface, PCWSTR, Result, w};
 use winuake_core::actions::Action;
@@ -54,15 +56,36 @@ struct TabClick {
     at_millis: u64,
 }
 
+/// What the bars currently look like: a skin, or the built-in plain look when no skin loads.
+struct Appearance {
+    skin: Option<Rc<AppSkin>>,
+    skin_id: String,
+    hide_borders: bool,
+    title: Option<TitleView>,
+    tabs: Option<TabsView>,
+}
+
+struct TitleView {
+    text: TextBlock,
+    focus_button: Option<Rc<SkinButtonViews>>,
+    plain_keep_open: Option<TextBlock>,
+}
+
+struct TabsView {
+    strip: Panel,
+    plain_new_tab: Option<TextBlock>,
+    inline_plus: Option<UIElement>,
+}
+
 pub struct Chrome {
     root: Grid,
+    border_host: ContentControl,
     content: ContentControl,
-    title_bar: UIElement,
-    tab_bar: UIElement,
-    title_text: TextBlock,
-    keep_open_button: TextBlock,
-    tab_strip: Panel,
-    new_tab_button: TextBlock,
+    tab_host: ContentControl,
+    title_host: ContentControl,
+    appearance: RefCell<Appearance>,
+    /// The terminal title last shown; the skin caption is added when drawing.
+    title: RefCell<String>,
 }
 
 fn load(markup: &str) -> Result<FrameworkElement> {
@@ -77,15 +100,10 @@ fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-impl Chrome {
-    pub fn create() -> Result<Self> {
-        let markup = format!(
-            r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Background="#FF1E1E1E">
-  <Grid.RowDefinitions>
-    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/>
-  </Grid.RowDefinitions>
-  <Grid x:Name="TitleBar" Grid.Row="0" Height="26" Background="#FF2B2B2B">
-    <TextBlock x:Name="TitleText" Foreground="{COLOR_TEXT}" FontSize="12" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+fn plain_title_markup() -> String {
+    format!(
+        r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Height="26" Background="#FF2B2B2B">
+    <TextBlock x:Name="TitleText" Foreground="{COLOR_TEXT}" FontSize="12" VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False"/>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="6,0,0,0">
       <TextBlock x:Name="KeepOpenButton" Text="&#xE718;" FontFamily="{ICON_FONT}" FontSize="12" Foreground="{COLOR_TEXT_DIM}" VerticalAlignment="Center" Padding="6,0,6,0"/>
     </StackPanel>
@@ -93,27 +111,56 @@ impl Chrome {
       <TextBlock x:Name="MenuButton" Text="&#xE713;" FontFamily="{ICON_FONT}" FontSize="12" Foreground="{COLOR_TEXT_DIM}" VerticalAlignment="Center" Padding="6,0,6,0"/>
       <TextBlock x:Name="QuitButton" Text="&#xE711;" FontFamily="{ICON_FONT}" FontSize="12" Foreground="{COLOR_TEXT_DIM}" VerticalAlignment="Center" Padding="6,0,6,0"/>
     </StackPanel>
-  </Grid>
-  <Grid x:Name="TabBar" Grid.Row="1" Height="28" Background="#FF252525">
+  </Grid>"##
+    )
+}
+
+fn plain_tab_bar_markup() -> String {
+    format!(
+        r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Height="28" Background="#FF252525">
     <StackPanel x:Name="TabStrip" Orientation="Horizontal" HorizontalAlignment="Left"/>
-  </Grid>
-  <ContentControl x:Name="ContentHost" Grid.Row="2" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" IsTabStop="False"/>
+  </Grid>"##
+    )
+}
+
+fn press(element: &UIElement, action: impl Fn() + Send + 'static) -> Result<()> {
+    std::mem::forget(element.PointerPressed(move |_, args| {
+        if let Some(args) = args.as_ref() {
+            let _ = args.SetHandled(true);
+        }
+        action();
+    })?);
+    Ok(())
+}
+
+impl Chrome {
+    pub fn create() -> Result<Self> {
+        let markup = format!(
+            r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Background="#FF1E1E1E">
+  <Grid.RowDefinitions>
+    <RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+  </Grid.RowDefinitions>
+  <ContentControl x:Name="BorderHost" Grid.Row="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" IsTabStop="False"/>
+  <ContentControl x:Name="ContentHost" Grid.Row="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" IsTabStop="False"/>
+  <ContentControl x:Name="TabHost" Grid.Row="1" HorizontalContentAlignment="Stretch" IsTabStop="False" Padding="0"/>
+  <ContentControl x:Name="TitleHost" Grid.Row="2" HorizontalContentAlignment="Stretch" IsTabStop="False" Padding="0"/>
 </Grid>"##
         );
         let root_element = load(&markup)?;
-        let new_tab_button: TextBlock = load(&format!(
-            r#"<TextBlock xmlns="{XAML_NAMESPACE}" Text="&#xE710;" FontFamily="{ICON_FONT}" FontSize="12" Foreground="{COLOR_TEXT_DIM}" VerticalAlignment="Center" Padding="10,0,10,0"/>"#
-        ))?
-        .cast()?;
         Ok(Self {
             root: root_element.cast()?,
+            border_host: find(&root_element, "BorderHost")?,
             content: find(&root_element, "ContentHost")?,
-            title_bar: find(&root_element, "TitleBar")?,
-            tab_bar: find(&root_element, "TabBar")?,
-            title_text: find(&root_element, "TitleText")?,
-            keep_open_button: find(&root_element, "KeepOpenButton")?,
-            tab_strip: find(&root_element, "TabStrip")?,
-            new_tab_button,
+            tab_host: find(&root_element, "TabHost")?,
+            title_host: find(&root_element, "TitleHost")?,
+            appearance: RefCell::new(Appearance {
+                skin: None,
+                skin_id: String::new(),
+                hide_borders: false,
+                title: None,
+                tabs: None,
+            }),
+            title: RefCell::new(String::new()),
         })
     }
 
@@ -125,42 +172,126 @@ impl Chrome {
         self.content.clone()
     }
 
-    /// Hooks up the title bar buttons and the new-tab button. Called once, after the host exists.
+    /// Called once after the host exists: draws the bars for the current settings.
     pub fn connect(&self, _host: &Rc<WorkspaceHost>) -> Result<()> {
-        let root: FrameworkElement = self.root.cast()?;
-        let keep_open: UIElement = self.keep_open_button.cast()?;
-        std::mem::forget(keep_open.PointerPressed(move |_, args| {
-            if let Some(args) = args.as_ref() {
-                let _ = args.SetHandled(true);
-            }
-            workspace_host::run_action(Action::KeepOpen);
-        })?);
-        let quit: UIElement = find(&root, "QuitButton")?;
-        std::mem::forget(quit.PointerPressed(move |_, args| {
-            if let Some(args) = args.as_ref() {
-                let _ = args.SetHandled(true);
-            }
-            workspace_host::request_quit();
-        })?);
-        let menu: UIElement = find(&root, "MenuButton")?;
-        std::mem::forget(menu.PointerPressed(move |_, args| {
-            if let Some(args) = args.as_ref() {
-                let _ = args.SetHandled(true);
-            }
-            show_main_menu();
-        })?);
-        let new_tab: UIElement = self.new_tab_button.cast()?;
-        std::mem::forget(new_tab.PointerPressed(move |_, args| {
-            if let Some(args) = args.as_ref() {
-                let _ = args.SetHandled(true);
-            }
-            workspace_host::run_action(Action::NewSession);
-        })?);
         Ok(())
     }
 
+    /// Draws the title bar, tab bar and borders for the skin in `settings`. Does nothing when neither the skin nor the border setting changed.
+    pub fn apply_appearance(&self, settings: &winuake_config::settings::Settings, host: &WorkspaceHost) {
+        let wanted = settings.appearance.skin.clone();
+        let hide_borders = settings.appearance.hide_skin_borders;
+        {
+            let appearance = self.appearance.borrow();
+            if appearance.title.is_some() && appearance.skin_id == wanted && appearance.hide_borders == hide_borders {
+                return;
+            }
+        }
+        let skin = AppSkin::load(&wanted).or_else(|| {
+            tracing::warn!(skin = %wanted, "skin not found; using the default skin");
+            AppSkin::load("default")
+        });
+        if let Err(error) = self.build(skin.map(Rc::new), &wanted, hide_borders) {
+            tracing::error!(%error, "could not draw the skin; falling back to the plain look");
+            if let Err(error) = self.build(None, &wanted, hide_borders) {
+                tracing::error!(%error, "could not draw the plain look");
+            }
+        }
+        self.refresh_tabs(host);
+        let title = self.title.borrow().clone();
+        self.set_title(&title);
+    }
+
+    fn build(&self, skin: Option<Rc<AppSkin>>, skin_id: &str, hide_borders: bool) -> Result<()> {
+        crate::skin_chrome::clear_registry();
+        let (title_element, tab_element) = match &skin {
+            Some(skin) => (load(&skin_chrome::title_bar_markup(skin))?, load(&skin_chrome::tab_bar_markup(skin))?),
+            None => (load(&plain_title_markup())?, load(&plain_tab_bar_markup())?),
+        };
+        let title_text: TextBlock = find(&title_element, "TitleText")?;
+        let mut title = TitleView { text: title_text, focus_button: None, plain_keep_open: None };
+        let mut tabs = TabsView { strip: find(&tab_element, "TabStrip")?, plain_new_tab: None, inline_plus: None };
+
+        match &skin {
+            Some(_) => {
+                title.focus_button =
+                    SkinButtonViews::connect(&title_element, "Focus", || workspace_host::run_action(Action::KeepOpen))?;
+                SkinButtonViews::connect(&title_element, "Config", show_main_menu)?;
+                SkinButtonViews::connect(&title_element, "Quit", workspace_host::request_quit)?;
+                SkinButtonViews::connect(&tab_element, "Plus", || workspace_host::run_action(Action::NewSession))?;
+                SkinButtonViews::connect(&tab_element, "Minus", workspace_host::close_selected_session)?;
+            }
+            None => {
+                let keep_open: TextBlock = find(&title_element, "KeepOpenButton")?;
+                press(&keep_open.cast()?, || workspace_host::run_action(Action::KeepOpen))?;
+                title.plain_keep_open = Some(keep_open);
+                press(&find(&title_element, "QuitButton")?, workspace_host::request_quit)?;
+                press(&find(&title_element, "MenuButton")?, show_main_menu)?;
+                let new_tab: TextBlock = load(&format!(
+                    r#"<TextBlock xmlns="{XAML_NAMESPACE}" Text="&#xE710;" FontFamily="{ICON_FONT}" FontSize="12" Foreground="{COLOR_TEXT_DIM}" VerticalAlignment="Center" Padding="10,0,10,0"/>"#
+                ))?
+                .cast()?;
+                press(&new_tab.cast()?, || workspace_host::run_action(Action::NewSession))?;
+                tabs.plain_new_tab = Some(new_tab);
+            }
+        }
+        if let Some(skin) = skin.as_ref().filter(|skin| skin.skin.tab_bar.plus_button_at_end_of_tabs) {
+            let inline = load(&skin_chrome::plus_button_inline_markup(skin))?;
+            SkinButtonViews::connect(&inline, "Plus", || workspace_host::run_action(Action::NewSession))?;
+            tabs.inline_plus = Some(inline.cast()?);
+        }
+        crate::title_drag::connect(&title_element.cast()?)?;
+
+        self.title_host.SetContent(&title_element)?;
+        self.tab_host.SetContent(&tab_element)?;
+
+        // Borders: the skin's color shows around the terminals, which sit inset by the border width.
+        let border_width = match (&skin, hide_borders) {
+            (Some(skin), false) => skin.skin.border.width.max(0),
+            _ => 0,
+        };
+        let border_fill = match (&skin, hide_borders) {
+            (Some(skin), false) => {
+                format!(r##"<Rectangle xmlns="{XAML_NAMESPACE}" Fill="#FF{}"/>"##, &skin.skin.border.color.hex()[1..])
+            }
+            _ => format!(r##"<Rectangle xmlns="{XAML_NAMESPACE}" Fill="#00000000"/>"##),
+        };
+        self.border_host.SetContent(&load(&border_fill)?)?;
+        let inset = f64::from(border_width);
+        self.content.cast::<FrameworkElement>()?.SetMargin(Thickness {
+            Left: inset,
+            Top: 0.0,
+            Right: inset,
+            Bottom: inset,
+        })?;
+
+        let mut appearance = self.appearance.borrow_mut();
+        appearance.skin = skin;
+        appearance.skin_id = skin_id.to_owned();
+        appearance.hide_borders = hide_borders;
+        appearance.title = Some(title);
+        appearance.tabs = Some(tabs);
+        Ok(())
+    }
+
+    /// The text shown in the title bar: terminal title, then the skin's caption.
+    fn display_title(&self, title: &str) -> String {
+        let caption =
+            self.appearance.borrow().skin.as_ref().map(|skin| skin.skin.title_bar.text.clone()).unwrap_or_default();
+        match (title.is_empty(), caption.is_empty()) {
+            (false, false) => format!("{title} - {caption}"),
+            (true, false) => caption,
+            _ => title.to_owned(),
+        }
+    }
+
     pub fn set_title(&self, title: &str) {
-        if let Err(error) = self.title_text.SetText(&HSTRING::from(title)) {
+        *self.title.borrow_mut() = title.to_owned();
+        let shown = self.display_title(title);
+        let appearance = self.appearance.borrow();
+        if let Some(view) = &appearance.title
+            && let Err(error) = view.text.SetText(&HSTRING::from(shown))
+        {
             tracing::warn!(%error, "could not set the title text");
         }
     }
@@ -174,17 +305,25 @@ impl Chrome {
         crate::settings_store::update(|settings| settings.window.show_title_bar = !settings.window.show_title_bar);
     }
 
-    /// Shows or hides the title bar and tab bar and refreshes the keep-open pin.
+    /// Shows or hides the title bar and tab bar and refreshes the keep-open indicator.
     pub fn apply_bar_visibility(&self, window: &winuake_config::window::WindowSettings) {
         let visibility = |shown: bool| if shown { Visibility::Visible } else { Visibility::Collapsed };
-        if let Err(error) = self.title_bar.SetVisibility(visibility(window.show_title_bar)) {
+        if let Err(error) = self.title_host.SetVisibility(visibility(window.show_title_bar)) {
             tracing::warn!(%error, "could not change the title bar visibility");
         }
-        if let Err(error) = self.tab_bar.SetVisibility(visibility(window.show_tab_bar)) {
+        if let Err(error) = self.tab_host.SetVisibility(visibility(window.show_tab_bar)) {
             tracing::warn!(%error, "could not change the tab bar visibility");
         }
-        let glyph = if window.keep_open { "\u{E840}" } else { "\u{E718}" };
-        let _ = self.keep_open_button.SetText(&HSTRING::from(glyph));
+        let appearance = self.appearance.borrow();
+        if let Some(title) = &appearance.title {
+            if let Some(button) = &title.focus_button {
+                button.set_checked(window.keep_open);
+            }
+            if let Some(glyph) = &title.plain_keep_open {
+                let text = if window.keep_open { "\u{E840}" } else { "\u{E718}" };
+                let _ = glyph.SetText(&HSTRING::from(text));
+            }
+        }
     }
 
     /// Rebuilds the tab strip from the workspace.
@@ -195,25 +334,48 @@ impl Chrome {
     }
 
     fn try_refresh_tabs(&self, host: &WorkspaceHost) -> Result<()> {
-        let children = self.tab_strip.Children()?;
+        let appearance = self.appearance.borrow();
+        let Some(tabs) = &appearance.tabs else { return Ok(()) };
+        let children = tabs.strip.Children()?;
         children.Clear()?;
         let renaming = RENAMING.with(Cell::get);
         let mut rename_box = None;
         {
             let workspace = host.workspace();
-            let tabs = workspace.tabs();
-            for session in tabs.order() {
-                let selected = tabs.selected() == Some(*session);
-                let title = tabs.title(*session).unwrap_or_default();
+            let tab_list = workspace.tabs();
+            let order = tab_list.order();
+            let selected_index = tab_list.selected().and_then(|session| tab_list.index_of(session));
+            for (index, session) in order.iter().enumerate() {
+                let selected = tab_list.selected() == Some(*session);
+                let title = tab_list.title(*session).unwrap_or_default();
                 let locked = workspace.stack().session(*session).is_some_and(|candidate| !candidate.closable());
-                let (tab, rename) = build_tab(*session, title, selected, locked, renaming == Some(*session))?;
+                let is_renaming = renaming == Some(*session);
+                let (tab, rename) = match &appearance.skin {
+                    Some(skin) => {
+                        let look = TabLook {
+                            title,
+                            selected,
+                            locked,
+                            previous_is_selected: selected_index.is_some_and(|chosen| index == chosen + 1),
+                            next_is_selected: selected_index.is_some_and(|chosen| chosen > 0 && index == chosen - 1),
+                            renaming: is_renaming,
+                        };
+                        build_skin_tab(*session, &skin_chrome::tab_markup(skin, &look), is_renaming)?
+                    }
+                    None => build_tab(*session, title, selected, locked, is_renaming)?,
+                };
                 children.Append(&tab.cast::<UIElement>()?)?;
                 if rename.is_some() {
                     rename_box = rename;
                 }
             }
         }
-        children.Append(&self.new_tab_button.cast::<UIElement>()?)?;
+        if let Some(plain) = &tabs.plain_new_tab {
+            children.Append(&plain.cast::<UIElement>()?)?;
+        }
+        if let Some(inline) = &tabs.inline_plus {
+            children.Append(inline)?;
+        }
         if let Some(rename_box) = rename_box {
             workspace_host::suspend_text_routing();
             let _ = rename_box.Focus(crate::bindings::FocusState::Programmatic);
@@ -226,6 +388,21 @@ impl Chrome {
         RENAMING.with(|slot| slot.set(Some(session)));
         self.refresh_tabs(host);
     }
+}
+
+/// A tab drawn from a skin: pointer handling and the rename box, no per-tab close button (the skin has one close button).
+fn build_skin_tab(session: SessionId, markup: &str, renaming: bool) -> Result<(FrameworkElement, Option<TextBox>)> {
+    let tab = load(markup)?;
+    let ui: UIElement = tab.cast()?;
+    connect_tab_pointer(&ui, &tab, session)?;
+    let rename_box = if renaming {
+        let text_box: TextBox = find(&tab, "RenameBox")?;
+        connect_rename_box(&text_box, session)?;
+        Some(text_box)
+    } else {
+        None
+    };
+    Ok((tab, rename_box))
 }
 
 /// Builds one tab. Returns the element and, when it is being renamed, its text box.
