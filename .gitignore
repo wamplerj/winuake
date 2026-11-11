@@ -14,7 +14,6 @@ packages/
 # Generated WinUI bindings (cargo xtask gen-bindings)
 /crates/winuake/src/bindings.rs
 /crates/winuake/src/composition.rs
-/crates/winuake/src/graphics.rs
 /crates/winuake-term/src/conpty_bindings.rs
 /crates/winuake-render/src/gpu_bindings.rs
 

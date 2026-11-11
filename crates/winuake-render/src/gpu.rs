@@ -12,11 +12,11 @@ use crate::gpu_bindings::{
     D3D11CreateDevice, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC,
     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_LINE_METRICS,
     DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, DXGI_ALPHA_MODE_PREMULTIPLIED,
-    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
+    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MATRIX_3X2_F, DXGI_SAMPLE_DESC, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
     DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE, DXGI_USAGE_RENDER_TARGET_OUTPUT, HMODULE, ID2D1Bitmap1,
     ID2D1DeviceContext, ID2D1Factory1, ID2D1Image, ID2D1SolidColorBrush, ID3D11Device, ID3D11DeviceContext,
     ID3D11Texture2D, IDWriteFactory, IDWriteFontCollection, IDWriteTextFormat, IDXGIAdapter, IDXGIDevice,
-    IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1,
+    IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1, IDXGISwapChain2,
 };
 use core::mem::ManuallyDrop;
 use windows_core::{Interface, PCWSTR, Result};
@@ -73,6 +73,9 @@ pub struct TerminalRenderer {
     d2d_context: ID2D1DeviceContext,
     target: Option<ID2D1Bitmap1>,
     brush: ID2D1SolidColorBrush,
+    dwrite: IDWriteFactory,
+    font_family: String,
+    font_size_points: f32,
     /// Regular, bold, italic, bold italic.
     text_formats: [IDWriteTextFormat; 4],
     metrics: CellMetrics,
@@ -111,14 +114,7 @@ impl TerminalRenderer {
 
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let family = resolve_font_family(&dwrite, &font.family)?;
-            let size_px = font.size_points * dpi / 72.0;
-            let text_formats = [
-                create_text_format(&dwrite, &family, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, size_px)?,
-                create_text_format(&dwrite, &family, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, size_px)?,
-                create_text_format(&dwrite, &family, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, size_px)?,
-                create_text_format(&dwrite, &family, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, size_px)?,
-            ];
-            let metrics = measure_cell(&dwrite, &text_formats[0])?;
+            let (text_formats, metrics) = create_fonts(&dwrite, &family, font.size_points, dpi)?;
 
             let mut renderer = Self {
                 d3d_device,
@@ -127,6 +123,9 @@ impl TerminalRenderer {
                 d2d_context,
                 target: None,
                 brush,
+                dwrite,
+                font_family: family,
+                font_size_points: font.size_points,
                 text_formats,
                 metrics,
                 width_px,
@@ -135,6 +134,23 @@ impl TerminalRenderer {
             renderer.attach_target()?;
             Ok(renderer)
         }
+    }
+
+    /// Rebuilds the fonts for a new DPI (96 = 100%); cell metrics change accordingly, so callers must recompute the grid.
+    pub fn set_dpi(&mut self, dpi: f32) -> Result<()> {
+        let (text_formats, metrics) =
+            unsafe { create_fonts(&self.dwrite, &self.font_family, self.font_size_points, dpi)? };
+        self.text_formats = text_formats;
+        self.metrics = metrics;
+        Ok(())
+    }
+
+    /// XAML scales swap chain content by the panel's composition scale; applying the inverse keeps pixels 1:1.
+    pub fn set_composition_scale(&self, scale: f32) -> Result<()> {
+        let inverse = 1.0 / scale.max(0.1);
+        let matrix = DXGI_MATRIX_3X2_F { _11: inverse, _12: 0.0, _21: 0.0, _22: inverse, _31: 0.0, _32: 0.0 };
+        let swap_chain: IDXGISwapChain2 = self.swap_chain.cast()?;
+        unsafe { swap_chain.SetMatrixTransform(&matrix).ok() }
     }
 
     /// Attach this to a `SwapChainPanel` (via `ISwapChainPanelNative::SetSwapChain`).
@@ -432,6 +448,25 @@ impl TerminalRenderer {
             self.d3d_context.Unmap(&staging, 0);
             Ok(PixelImage { width, height, bgra })
         }
+    }
+}
+
+unsafe fn create_fonts(
+    dwrite: &IDWriteFactory,
+    family: &str,
+    size_points: f32,
+    dpi: f32,
+) -> Result<([IDWriteTextFormat; 4], CellMetrics)> {
+    let size_px = size_points * dpi / 72.0;
+    unsafe {
+        let text_formats = [
+            create_text_format(dwrite, family, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, size_px)?,
+            create_text_format(dwrite, family, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, size_px)?,
+            create_text_format(dwrite, family, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, size_px)?,
+            create_text_format(dwrite, family, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, size_px)?,
+        ];
+        let metrics = measure_cell(dwrite, &text_formats[0])?;
+        Ok((text_formats, metrics))
     }
 }
 

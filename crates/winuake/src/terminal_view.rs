@@ -1,0 +1,350 @@
+//! One terminal on screen: a focusable XAML control hosting a `SwapChainPanel`, with the renderer, the shell session, keyboard
+//! input, resizing, DPI scaling, cursor blink, and output-driven redraws wired together.
+//!
+//! WinUI event handlers must be `Send + 'static`, so they capture only a `TerminalId` and look the view up in a UI-thread registry.
+
+use crate::bindings::{
+    ContentControl, DispatcherQueue, DispatcherQueueHandler, FocusState, HorizontalAlignment, SwapChainPanel,
+    VerticalAlignment,
+};
+use crate::swap_chain_panel_native::ISwapChainPanelNative;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
+use std::thread;
+use std::time::Duration;
+use windows_core::{Interface, Result};
+use winuake_render::color::ColorScheme;
+use winuake_render::gpu::{FontSpec, TerminalRenderer};
+use winuake_term::input::{Key, Modifiers, encode_key};
+use winuake_term::keyboard::{self, CharacterAssembler, KeyDownAction, decide_key_down, text_for_character};
+use winuake_term::pty::TerminalSize;
+use winuake_term::session::{SessionEvent, TerminalId, TerminalSession};
+
+const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// High bit of `GetKeyState`: the key is currently down.
+const KEY_DOWN_BIT: i16 = i16::MIN;
+const INITIAL_WIDTH_PX: u32 = 800;
+const INITIAL_HEIGHT_PX: u32 = 480;
+
+thread_local! {
+    /// The view that received the most recent key press; text messages that follow belong to it.
+    static KEY_TARGET: Cell<Option<TerminalId>> = const { Cell::new(None) };
+    static VIEWS: RefCell<HashMap<TerminalId, Rc<TerminalView>>> = RefCell::new(HashMap::new());
+}
+
+fn with_view(id: TerminalId, action: impl FnOnce(&TerminalView)) {
+    let view = VIEWS.with(|views| views.borrow().get(&id).cloned());
+    if let Some(view) = view {
+        action(&view);
+    }
+}
+
+struct RenderState {
+    renderer: TerminalRenderer,
+    scale: f32,
+}
+
+pub struct TerminalView {
+    id: TerminalId,
+    control: ContentControl,
+    panel: SwapChainPanel,
+    session: Arc<TerminalSession>,
+    render: RefCell<RenderState>,
+    scheme: ColorScheme,
+    characters: RefCell<CharacterAssembler>,
+    redraw_pending: Arc<AtomicBool>,
+    cursor_visible: Arc<AtomicBool>,
+    /// Dropped with the view; background threads watch it to know when to stop.
+    alive: Arc<()>,
+}
+
+impl TerminalView {
+    /// Builds the view, registers it on the UI thread, and starts pumping session events into redraws.
+    pub fn create(session: TerminalSession, font: &FontSpec, scheme: ColorScheme) -> Result<Rc<Self>> {
+        let id = session.id();
+        let session = Arc::new(session);
+
+        let panel = SwapChainPanel::new()?;
+        panel.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        panel.SetVerticalAlignment(VerticalAlignment::Stretch)?;
+        let control = ContentControl::new()?;
+        control.SetContent(&panel)?;
+        control.SetHorizontalContentAlignment(HorizontalAlignment::Stretch)?;
+        control.SetVerticalContentAlignment(VerticalAlignment::Stretch)?;
+        control.SetIsTabStop(true)?;
+        control.SetUseSystemFocusVisuals(false)?;
+
+        let renderer = TerminalRenderer::new(font, 96.0, INITIAL_WIDTH_PX, INITIAL_HEIGHT_PX)?;
+        panel.cast::<ISwapChainPanelNative>()?.attach(renderer.swap_chain())?;
+
+        let view = Rc::new(Self {
+            id,
+            control,
+            panel,
+            session,
+            render: RefCell::new(RenderState { renderer, scale: 1.0 }),
+            scheme,
+            characters: RefCell::new(CharacterAssembler::default()),
+            redraw_pending: Arc::new(AtomicBool::new(false)),
+            cursor_visible: Arc::new(AtomicBool::new(true)),
+            alive: Arc::new(()),
+        });
+
+        view.connect_xaml_events()?;
+        VIEWS.with(|views| views.borrow_mut().insert(id, Rc::clone(&view)));
+        view.start_background_threads()?;
+        view.apply_size();
+        Ok(view)
+    }
+
+    pub fn element(&self) -> &ContentControl {
+        &self.control
+    }
+
+    pub fn focus(&self) {
+        if let Err(error) = self.control.Focus(FocusState::Programmatic) {
+            tracing::warn!(terminal_id = %self.id, %error, "could not focus terminal");
+        }
+    }
+
+    fn connect_xaml_events(&self) -> Result<()> {
+        let id = self.id;
+        // The handlers live as long as the elements; revokers are deliberately forgotten.
+        std::mem::forget(self.panel.SizeChanged(move |_, _| with_view(id, TerminalView::apply_size))?);
+        std::mem::forget(self.panel.CompositionScaleChanged(move |_, _| with_view(id, TerminalView::apply_size))?);
+        std::mem::forget(self.control.KeyDown(move |_, args| {
+            if let Some(args) = args.as_ref() {
+                with_view(id, |view| view.handle_key_down(args));
+            }
+        })?);
+        Ok(())
+    }
+
+    fn start_background_threads(&self) -> Result<()> {
+        let dispatcher = DispatcherQueue::GetForCurrentThread()?;
+        spawn_event_pump(
+            self.id,
+            Arc::downgrade(&self.session),
+            dispatcher.clone(),
+            Arc::clone(&self.redraw_pending),
+            Arc::downgrade(&self.alive),
+        );
+        spawn_cursor_blinker(
+            self.id,
+            dispatcher,
+            Arc::clone(&self.cursor_visible),
+            Arc::clone(&self.redraw_pending),
+            Arc::downgrade(&self.alive),
+        );
+        Ok(())
+    }
+
+    /// Fits the swap chain, fonts and shell to the panel's current size and DPI, then redraws.
+    fn apply_size(&self) {
+        if let Err(error) = self.try_apply_size() {
+            tracing::error!(terminal_id = %self.id, %error, "failed to resize terminal view");
+        }
+    }
+
+    fn try_apply_size(&self) -> Result<()> {
+        let scale = self.panel.CompositionScaleX()?.max(0.5);
+        let width = (self.panel.ActualWidth()? as f32 * scale).round() as u32;
+        let height = (self.panel.ActualHeight()? as f32 * scale).round() as u32;
+        if width == 0 || height == 0 {
+            return Ok(());
+        }
+
+        let grid = {
+            let mut state = self.render.borrow_mut();
+            if (state.scale - scale).abs() > f32::EPSILON {
+                state.renderer.set_dpi(96.0 * scale)?;
+                state.scale = scale;
+            }
+            state.renderer.set_composition_scale(scale)?;
+            state.renderer.resize(width, height)?;
+            state.renderer.grid_size_for(width, height)
+        };
+        tracing::debug!(terminal_id = %self.id, width, height, columns = grid.columns, rows = grid.rows, scale, "terminal view resized");
+        if let Err(error) = self.session.resize(TerminalSize::new(grid.columns, grid.rows)) {
+            tracing::warn!(terminal_id = %self.id, %error, "could not resize shell");
+        }
+        self.redraw();
+        Ok(())
+    }
+
+    fn redraw(&self) {
+        let snapshot = self.session.with_emulator(|emulator| emulator.snapshot());
+        let cursor_visible = self.cursor_visible.load(Ordering::Relaxed);
+        if let Err(error) = self.render.borrow_mut().renderer.render(&snapshot, &self.scheme, cursor_visible) {
+            tracing::error!(terminal_id = %self.id, %error, "failed to draw terminal");
+        }
+    }
+
+    fn handle_key_down(&self, args: &crate::bindings::KeyRoutedEventArgs) {
+        KEY_TARGET.with(|target| target.set(Some(self.id)));
+        let Ok(virtual_key) = args.Key() else { return };
+        let modifiers = current_modifiers();
+        if let KeyDownAction::Send(key) = decide_key_down(virtual_key.0, modifiers) {
+            self.send_key(key, modifiers);
+            let _ = args.SetHandled(true);
+        }
+    }
+
+    /// A UTF-16 unit from the message queue (`WM_CHAR` / `WM_SYSCHAR`): the text the keyboard layout and IME produced.
+    fn handle_character_unit(&self, unit: u16) {
+        let Some(character) = self.characters.borrow_mut().push(unit) else { return };
+        if let Some((key, modifiers)) = text_for_character(character, current_modifiers()) {
+            self.send_key(key, modifiers);
+        }
+    }
+
+    fn send_key(&self, key: Key, modifiers: Modifiers) {
+        let modes = self.session.with_emulator(|emulator| emulator.input_modes());
+        let Some(bytes) = encode_key(key, modifiers, &modes) else { return };
+        // Typing returns to the live screen and makes the cursor solid.
+        self.session.update_emulator(|emulator| emulator.scroll_view(winuake_term::emulator::ScrollRequest::Bottom));
+        self.cursor_visible.store(true, Ordering::Relaxed);
+        if let Err(error) = self.session.send_input(&bytes) {
+            tracing::warn!(terminal_id = %self.id, %error, "could not send input to shell");
+        }
+        self.redraw();
+    }
+}
+
+impl Drop for TerminalView {
+    fn drop(&mut self) {
+        tracing::debug!(terminal_id = %self.id, "terminal view dropped");
+    }
+}
+
+windows_core::link!("user32.dll" "system" fn GetKeyState(virtual_key: i32) -> i16);
+
+fn current_modifiers() -> Modifiers {
+    let is_down = |virtual_key: i32| unsafe { GetKeyState(virtual_key) } & KEY_DOWN_BIT != 0;
+    Modifiers {
+        shift: is_down(keyboard::VK_SHIFT),
+        control: is_down(keyboard::VK_CONTROL),
+        alt: is_down(keyboard::VK_MENU),
+    }
+}
+
+/// Asks the UI thread to redraw, at most once until it has done so.
+fn request_redraw(id: TerminalId, dispatcher: &DispatcherQueue, pending: &AtomicBool) {
+    if pending.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let redraw_pending = Arc::new(());
+    let _ = redraw_pending;
+    let handler = DispatcherQueueHandler::new(move || {
+        with_view(id, |view| {
+            view.redraw_pending.store(false, Ordering::Release);
+            view.redraw();
+        });
+        Ok(())
+    });
+    if !dispatcher.TryEnqueue(&handler).unwrap_or(false) {
+        pending.store(false, Ordering::Release);
+    }
+}
+
+fn spawn_event_pump(
+    id: TerminalId,
+    session: Weak<TerminalSession>,
+    dispatcher: DispatcherQueue,
+    pending: Arc<AtomicBool>,
+    alive: Weak<()>,
+) {
+    let spawned = thread::Builder::new().name(format!("terminal-{id}-events")).spawn(move || {
+        while alive.upgrade().is_some() {
+            let Some(session) = session.upgrade() else { break };
+            match session.next_event_timeout(EVENT_POLL_INTERVAL) {
+                Some(SessionEvent::Exited(status)) => {
+                    tracing::info!(terminal_id = %id, exit_code = ?status.code, "shell exited");
+                    request_redraw(id, &dispatcher, &pending);
+                    break;
+                }
+                Some(SessionEvent::TitleChanged(title)) => {
+                    tracing::debug!(terminal_id = %id, length = title.len(), "terminal title changed");
+                    request_redraw(id, &dispatcher, &pending);
+                }
+                Some(_) => request_redraw(id, &dispatcher, &pending),
+                None => {}
+            }
+        }
+    });
+    if let Err(error) = spawned {
+        tracing::error!(terminal_id = %id, %error, "could not start terminal event thread");
+    }
+}
+
+fn spawn_cursor_blinker(
+    id: TerminalId,
+    dispatcher: DispatcherQueue,
+    cursor_visible: Arc<AtomicBool>,
+    pending: Arc<AtomicBool>,
+    alive: Weak<()>,
+) {
+    let spawned = thread::Builder::new().name(format!("terminal-{id}-blink")).spawn(move || {
+        while alive.upgrade().is_some() {
+            thread::sleep(CURSOR_BLINK_INTERVAL);
+            cursor_visible.fetch_xor(true, Ordering::Relaxed);
+            request_redraw(id, &dispatcher, &pending);
+        }
+    });
+    if let Err(error) = spawned {
+        tracing::error!(terminal_id = %id, %error, "could not start cursor blink thread");
+    }
+}
+
+// --- Text input -------------------------------------------------------------------------------------------------------------------
+//
+// XAML's `CharacterReceived` is never raised for this unpackaged WinUI 3 setup, so text is read from the thread's message queue.
+// `WM_CHAR` / `WM_SYSCHAR` carry exactly what the keyboard layout (including dead keys) and IME produced.
+
+const WH_GETMESSAGE: i32 = 3;
+const HC_ACTION: i32 = 0;
+const PM_REMOVE: usize = 1;
+const WM_CHAR: u32 = 0x0102;
+const WM_SYSCHAR: u32 = 0x0106;
+
+#[repr(C)]
+struct WindowMessage {
+    window: isize,
+    message: u32,
+    w_parameter: usize,
+    l_parameter: isize,
+    time: u32,
+    point_x: i32,
+    point_y: i32,
+}
+
+type HookCallback = unsafe extern "system" fn(code: i32, w_parameter: usize, l_parameter: isize) -> isize;
+
+windows_core::link!("user32.dll" "system" fn SetWindowsHookExW(hook_kind: i32, callback: HookCallback, module: isize, thread_id: u32) -> isize);
+windows_core::link!("user32.dll" "system" fn CallNextHookEx(hook: isize, code: i32, w_parameter: usize, l_parameter: isize) -> isize);
+windows_core::link!("kernel32.dll" "system" fn GetCurrentThreadId() -> u32);
+
+/// Routes text typed into the focused terminal to its shell. Call once, on the UI thread.
+pub fn install_text_input_hook() -> Result<()> {
+    let hook = unsafe { SetWindowsHookExW(WH_GETMESSAGE, text_message_hook, 0, GetCurrentThreadId()) };
+    if hook == 0 {
+        return Err(windows_core::Error::from_thread());
+    }
+    Ok(())
+}
+
+unsafe extern "system" fn text_message_hook(code: i32, w_parameter: usize, l_parameter: isize) -> isize {
+    if code == HC_ACTION && w_parameter == PM_REMOVE {
+        let message = unsafe { &*(l_parameter as *const WindowMessage) };
+        if matches!(message.message, WM_CHAR | WM_SYSCHAR)
+            && let Some(id) = KEY_TARGET.with(Cell::get)
+        {
+            with_view(id, |view| view.handle_character_unit(message.w_parameter as u16));
+        }
+    }
+    unsafe { CallNextHookEx(0, code, w_parameter, l_parameter) }
+}

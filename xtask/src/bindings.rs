@@ -24,7 +24,18 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.Controls.TabViewItem::{CreateInstance, put_Header}",
     "Microsoft.UI.Xaml.Controls.TextBlock::{CreateInstance, put_Text}",
     "Microsoft.UI.Xaml.Controls.SwapChainPanel::CreateInstance",
-    "Microsoft.UI.Xaml.FrameworkElement::{put_Width, put_Height}",
+    "Microsoft.UI.Xaml.FrameworkElement::{put_Width, put_Height, put_HorizontalAlignment, put_VerticalAlignment, add_SizeChanged, remove_SizeChanged, get_ActualWidth, get_ActualHeight}",
+    "Microsoft.UI.Xaml.SizeChangedEventHandler",
+    "Microsoft.UI.Xaml.SizeChangedEventArgs::get_NewSize",
+    "Microsoft.UI.Xaml.Controls.SwapChainPanel::{get_CompositionScaleX, get_CompositionScaleY, add_CompositionScaleChanged}",
+    "Microsoft.UI.Xaml.UIElement::{add_KeyDown, Focus}",
+    "Microsoft.UI.Xaml.Input.KeyEventHandler",
+    "Microsoft.UI.Xaml.IRoutedEventArgsFactory",
+    "Microsoft.UI.Xaml.Input.KeyRoutedEventArgs::{get_Key, put_Handled}",
+    "Microsoft.UI.Xaml.Controls.ContentControl::CreateInstance",
+    "Microsoft.UI.Xaml.Controls.Control::{put_IsTabStop, put_UseSystemFocusVisuals, put_HorizontalContentAlignment, put_VerticalContentAlignment}",
+    "Microsoft.UI.Dispatching.DispatcherQueue::{GetForCurrentThread, TryEnqueue}",
+    "Microsoft.UI.Dispatching.DispatcherQueueHandler",
     "Microsoft.UI.Xaml.XamlTypeInfo.XamlControlsXamlMetaDataProvider::CreateInstance",
     "Microsoft.UI.Xaml.XamlTypeInfo.IXamlControlsXamlMetaDataProviderStatics",
     "Microsoft.UI.Xaml.Markup.IXamlMetadataProvider::{GetXamlType, GetXamlTypeByFullName, GetXmlnsDefinitions}",
@@ -60,31 +71,6 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.IUIElementStatics",
     "Microsoft.UI.Xaml.IWindowStatics",
     "Microsoft.UI.Xaml.Controls.IXamlControlsResourcesStatics",
-];
-
-/// Win32 graphics used to render into a `SwapChainPanel`.
-const GRAPHICS_FILTERS: &[&str] = &[
-    "D3D11CreateDevice",
-    "ID3D11Device",
-    "ID3D11DeviceContext",
-    "ID3D11Texture2D",
-    "ID3D11RenderTargetView",
-    "D3D11_SDK_VERSION",
-    "D3D11_CREATE_DEVICE_BGRA_SUPPORT",
-    "D3D_DRIVER_TYPE_HARDWARE",
-    "IDXGIDevice",
-    "IDXGIAdapter",
-    "IDXGIObject",
-    "IDXGIFactory2",
-    "IDXGISwapChain1",
-    "IDXGISwapChain",
-    "IDXGIDeviceSubObject",
-    "DXGI_SWAP_CHAIN_DESC1",
-    "DXGI_USAGE_RENDER_TARGET_OUTPUT",
-    "DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL",
-    "DXGI_SCALING_STRETCH",
-    "DXGI_ALPHA_MODE_PREMULTIPLIED",
-    "DXGI_FORMAT_B8G8R8A8_UNORM",
 ];
 
 /// Win32 APIs used by the ConPTY backend in `winuake-term`.
@@ -133,6 +119,8 @@ const RENDER_FILTERS: &[&str] = &[
     "IDXGIFactory2",
     "IDXGISwapChain1",
     "IDXGISwapChain",
+    "IDXGISwapChain2",
+    "DXGI_MATRIX_3X2_F",
     "IDXGIDeviceSubObject",
     "IDXGISurface",
     "DXGI_SWAP_CHAIN_DESC1",
@@ -201,7 +189,11 @@ pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
 
     let ergonomic_output = source_directory.join("bindings.rs");
     let mut ergonomic = builder_with_inputs(&metadata);
-    ergonomic.output(&ergonomic_output).filters(ERGONOMIC_FILTERS.iter().copied()).flat();
+    ergonomic
+        .output(&ergonomic_output)
+        .filters(ERGONOMIC_FILTERS.iter().copied())
+        .flat()
+        .implement("Windows.Foundation.TypedEventHandler");
     ergonomic.write();
 
     let composition_output = source_directory.join("composition.rs");
@@ -216,11 +208,6 @@ pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
         .implement("Microsoft.UI.Xaml.Markup.IXamlMetadataProvider");
     composition.write();
 
-    let graphics_output = source_directory.join("graphics.rs");
-    let mut graphics = windows_bindgen::builder();
-    graphics.input_default().output(&graphics_output).filters(GRAPHICS_FILTERS.iter().copied()).flat();
-    graphics.write();
-
     let conpty_output = workspace_root.join("crates").join("winuake-term").join("src").join("conpty_bindings.rs");
     let mut conpty = windows_bindgen::builder();
     conpty.input_default().output(&conpty_output).filters(CONPTY_FILTERS.iter().copied()).flat();
@@ -232,7 +219,7 @@ pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
     render.write();
 
     eprintln!(
-        "wrote bindings.rs, composition.rs, graphics.rs, conpty_bindings.rs, gpu_bindings.rs from {} winmd files",
+        "wrote bindings.rs, composition.rs, conpty_bindings.rs, gpu_bindings.rs from {} winmd files",
         metadata.len()
     );
     Ok(())

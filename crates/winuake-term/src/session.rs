@@ -42,7 +42,8 @@ struct SessionShared {
 pub struct TerminalSession {
     id: TerminalId,
     shared: Arc<SessionShared>,
-    events: Receiver<SessionEvent>,
+    /// Behind a mutex so the session can be shared (`Sync`) between the UI thread and the thread pumping events.
+    events: Mutex<Receiver<SessionEvent>>,
 }
 
 impl TerminalSession {
@@ -69,7 +70,7 @@ impl TerminalSession {
                 reason: error.to_string(),
             })?;
 
-        Ok(Self { id, shared, events })
+        Ok(Self { id, shared, events: Mutex::new(events) })
     }
 
     pub fn id(&self) -> TerminalId {
@@ -108,13 +109,18 @@ impl TerminalSession {
         inspect(&lock(&self.shared.emulator))
     }
 
+    /// Runs `change` with the emulated screen locked for writing (scrolling, selection).
+    pub fn update_emulator<R>(&self, change: impl FnOnce(&mut TerminalEmulator) -> R) -> R {
+        change(&mut lock(&self.shared.emulator))
+    }
+
     pub fn try_next_event(&self) -> Option<SessionEvent> {
-        self.events.try_recv().ok()
+        lock(&self.events).try_recv().ok()
     }
 
     /// Waits up to `timeout` for the next event. `None` on timeout or after the final `Exited` event was consumed.
     pub fn next_event_timeout(&self, timeout: Duration) -> Option<SessionEvent> {
-        self.events.recv_timeout(timeout).ok()
+        lock(&self.events).recv_timeout(timeout).ok()
     }
 
     pub fn set_monitoring_activity(&self, enabled: bool) {

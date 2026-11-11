@@ -10,9 +10,11 @@ workspace = true
 [dependencies]
 winuake-core = { path = "../winuake-core" }
 winuake-config = { path = "../winuake-config" }
-winuake-term = { path = "../winuake-term" }
+winuake-term = { version = "0.1.0", path = "../winuake-term" }
 winuake-skin = { path = "../winuake-skin" }
 winuake-ipc = { path = "../winuake-ipc" }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-collections = "0.100.0"
