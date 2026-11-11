@@ -146,6 +146,12 @@ impl TerminalView {
         self.redraw();
     }
 
+    /// Types `text` into the shell as if pasted (scripting). Only the length is logged.
+    pub fn type_text(&self, text: &str) -> bool {
+        tracing::info!(terminal_id = %self.id, length = text.len(), "typing scripted text");
+        self.session.send_input(text.as_bytes()).is_ok()
+    }
+
     pub fn set_monitoring(&self, activity: bool, silence: bool) {
         self.session.set_monitoring_activity(activity);
         self.session.set_monitoring_silence(silence);

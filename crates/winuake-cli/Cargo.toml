@@ -9,3 +9,4 @@ workspace = true
 
 [dependencies]
 winuake-ipc = { path = "../winuake-ipc" }
+serde_json = "1"

@@ -26,6 +26,8 @@ mod flashes;
 #[cfg(windows)]
 mod message_hook;
 #[cfg(windows)]
+mod script_server;
+#[cfg(windows)]
 mod settings_store;
 #[cfg(windows)]
 mod settings_window;

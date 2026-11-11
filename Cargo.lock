@@ -1696,6 +1696,7 @@ checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 name = "winuake"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "tracing",
  "tracing-subscriber",
  "windows-collections",
@@ -1713,6 +1714,7 @@ dependencies = [
 name = "winuake-cli"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "winuake-ipc",
 ]
 

@@ -121,6 +121,9 @@ fn open_main_window() -> Result<()> {
         Box::new(crate::workspace_host::focus_active_terminal),
     )?;
     crate::settings_store::start_watching();
+    if let Ok(dispatcher) = crate::bindings::DispatcherQueue::GetForCurrentThread() {
+        crate::script_server::start(dispatcher);
+    }
     crate::drop_down::apply_settings(&settings);
 
     // Show once, off screen, so XAML lays the terminal out at its real size; then hide until the first toggle.

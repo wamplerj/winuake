@@ -672,6 +672,44 @@ pub fn shutdown() {
     }
 }
 
+/// Handles one scripting request line on the UI thread (called by the pipe server). `None` for a notification.
+pub fn run_script_line(line: &str) -> Option<String> {
+    let host = host()?;
+    let mut script_host = ScriptHostAdapter { geometry: host.geometry(), toggle_requested: false };
+    let (reply, effects) = {
+        let mut workspace = host.workspace.borrow_mut();
+        let mut session = winuake_ipc::script::ScriptSession::new(&mut workspace, &mut script_host);
+        let reply = session.handle_line(line);
+        (reply, session.into_effects())
+    };
+    host.apply(effects);
+    host.sync_monitoring();
+    // Toggling can create a session, so it waits until the workspace is no longer borrowed.
+    if script_host.toggle_requested {
+        crate::drop_down::toggle();
+    }
+    reply
+}
+
+struct ScriptHostAdapter {
+    geometry: PaneGeometry,
+    toggle_requested: bool,
+}
+
+impl winuake_ipc::script::ScriptHost for ScriptHostAdapter {
+    fn toggle_window_state(&mut self) {
+        self.toggle_requested = true;
+    }
+
+    fn send_text(&mut self, terminal: TerminalId, text: &str) -> bool {
+        terminal_view::find(terminal).is_some_and(|view| view.type_text(text))
+    }
+
+    fn pane_geometry(&self) -> PaneGeometry {
+        self.geometry
+    }
+}
+
 /// Handles a key-down as a shortcut. True when it was one (the key is consumed).
 pub fn handle_shortcut(virtual_key: i32, modifiers: Modifiers) -> bool {
     let Some(host) = host() else { return false };
