@@ -669,13 +669,48 @@ pub fn keyboard_input_enabled(terminal: TerminalId) -> bool {
 }
 
 /// A terminal gained keyboard focus.
+/// FocusFollowsMouse: the pointer moved over a terminal that does not have the focus.
+pub fn pointer_over_terminal(terminal: TerminalId) {
+    if !crate::settings_store::with_current(|settings| settings.window.focus_follows_mouse).unwrap_or(false) {
+        return;
+    }
+    let Some(host) = host() else { return };
+    if host.workspace.borrow().stack().active_terminal_id() != Some(terminal)
+        && let Some(view) = terminal_view::find(terminal)
+    {
+        view.focus();
+    }
+}
+
+/// Color of the activation highlight: Breeze's highlight blue, standing in for the desktop palette Yakuake reads.
+const HIGHLIGHT_COLOR: &str = "#3DAEE9";
+
 pub fn terminal_activated(terminal: TerminalId) {
     if let Some(view) = terminal_view::find(terminal) {
         view.acknowledge_monitor();
     }
     if let Some(host) = host() {
+        let previously_active = {
+            let workspace = host.workspace.borrow();
+            let session = workspace.stack().session_for_terminal(terminal).and_then(|id| workspace.stack().session(id));
+            session.and_then(|session| session.active_terminal().map(|active| (active, session.terminal_count())))
+        };
         let effects = host.workspace.borrow_mut().activate_terminal(terminal);
         host.apply(effects);
+        let appearance = crate::settings_store::with_current(|settings| settings.appearance.clone());
+        if let (Some(appearance), Some((previous, count))) = (appearance, previously_active)
+            && appearance.terminal_highlight_on_manual_activation
+            && previous != terminal
+            && count > 1
+            && crate::drop_down::is_open()
+        {
+            host.flash_terminal(
+                terminal,
+                HIGHLIGHT_COLOR,
+                appearance.terminal_highlight_opacity,
+                appearance.terminal_highlight_duration_ms,
+            );
+        }
     }
 }
 

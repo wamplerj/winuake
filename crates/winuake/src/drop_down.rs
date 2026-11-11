@@ -71,6 +71,10 @@ pub struct DropDownHost {
     toggle_hotkey: RefCell<Option<String>>,
     /// The last topmost state applied; re-applying it would lift the window above other topmost windows such as the settings window.
     topmost: Cell<Option<bool>>,
+    mouse_poll_timer: Cell<usize>,
+    /// Monitor layout seen at the last check, to notice displays being plugged, unplugged or rearranged.
+    last_monitors: RefCell<Vec<Monitor>>,
+    display_check_ticks: Cell<u32>,
 }
 
 impl DropDownHost {
@@ -98,6 +102,9 @@ impl DropDownHost {
             last_focus_state: Cell::new(None),
             toggle_hotkey: RefCell::new(toggle_hotkey.map(str::to_owned)),
             topmost: Cell::new(None),
+            mouse_poll_timer: Cell::new(0),
+            last_monitors: RefCell::new(enumerate_monitors()),
+            display_check_ticks: Cell::new(0),
         });
         host.apply_popup_style();
         HOST.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&host)));
@@ -363,7 +370,54 @@ impl DropDownHost {
         }
     }
 
+    /// Starts or stops watching the pointer for the top-edge gesture (`AutoOpen/PollMouse`).
+    fn update_mouse_poll(&self, auto_open: &winuake_config::settings::AutoOpenSettings) {
+        self.stop_timer(&self.mouse_poll_timer);
+        if auto_open.poll_mouse {
+            self.mouse_poll_timer
+                .set(unsafe { SetTimer(None, 0, auto_open.poll_interval_ms, Some(mouse_poll_timer_proc)) });
+        }
+    }
+
+    /// Ported from `MainWindow::pollMouse`: while hidden, the pointer on the top edge over the window's span opens it.
+    fn on_mouse_poll(&self) {
+        if self.controller.borrow().state() != DropDownState::Hidden {
+            return;
+        }
+        let settings = self.controller.borrow().settings().clone();
+        let monitors = enumerate_monitors();
+        let pointer = cursor_position();
+        let index = winuake_core::drop_down::select_screen(settings.screen, &monitors, pointer);
+        let Some(monitor) = monitors.get(index) else { return };
+        if winuake_core::drop_down::pointer_at_open_edge(
+            pointer,
+            monitor.work_area,
+            settings.width_percent,
+            settings.position_percent,
+        ) {
+            tracing::info!("pointer at the top edge; opening");
+            self.toggle();
+        }
+    }
+
+    /// While the window is open (the focus poll runs every 100 ms), notice monitor changes about once a second and place the window again.
+    fn check_displays(&self) {
+        let ticks = self.display_check_ticks.get() + 1;
+        self.display_check_ticks.set(ticks);
+        if ticks % 10 != 0 {
+            return;
+        }
+        let monitors = enumerate_monitors();
+        if *self.last_monitors.borrow() != monitors {
+            tracing::info!(count = monitors.len(), "display layout changed; placing the window again");
+            *self.last_monitors.borrow_mut() = monitors;
+            let settings = self.controller.borrow().settings().clone();
+            self.dispatch(DropDownEvent::SettingsChanged(settings));
+        }
+    }
+
     fn on_focus_poll(&self) {
+        self.check_displays();
         let foreground = unsafe { GetForegroundWindow() };
         let active = foreground == self.window;
         let belongs_to_window = !active && belongs_to_this_process(foreground);
@@ -415,6 +469,10 @@ fn enumerate_monitors() -> Vec<Monitor> {
 
 unsafe extern "system" fn animation_timer_proc(_window: HWND, _message: u32, _timer: usize, _time: u32) {
     with_host(DropDownHost::on_animation_tick);
+}
+
+unsafe extern "system" fn mouse_poll_timer_proc(_window: HWND, _message: u32, _timer: usize, _tick: u32) {
+    with_host(DropDownHost::on_mouse_poll);
 }
 
 unsafe extern "system" fn focus_timer_proc(_window: HWND, _message: u32, _timer: usize, _time: u32) {
@@ -490,6 +548,7 @@ pub fn toggle_keep_open() {
 /// New settings arrived (file edit or settings window): update the controller and the hotkey if it changed.
 pub fn apply_settings(settings: &winuake_config::settings::Settings) {
     with_host(|host| {
+        host.update_mouse_poll(&settings.auto_open);
         host.dispatch(DropDownEvent::SettingsChanged(settings.window.clone()));
         if host.toggle_hotkey.borrow().as_deref() != settings.toggle_hotkey.as_deref() {
             *host.toggle_hotkey.borrow_mut() = settings.toggle_hotkey.clone();

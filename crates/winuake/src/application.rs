@@ -106,6 +106,7 @@ fn open_main_window() -> Result<()> {
         Box::new(crate::workspace_host::focus_active_terminal),
     )?;
     crate::settings_store::start_watching();
+    crate::drop_down::apply_settings(&settings);
 
     // Show once, off screen, so XAML lays the terminal out at its real size; then hide until the first toggle.
     host.park_for_first_layout();

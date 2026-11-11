@@ -82,6 +82,11 @@ pub fn initialize() -> Settings {
     current
 }
 
+/// Reads the settings without copying them; `None` before `initialize`.
+pub fn with_current<T>(read: impl FnOnce(&Settings) -> T) -> Option<T> {
+    STATE.with(|state| state.borrow().as_ref().map(|state| read(&state.current)))
+}
+
 pub fn current() -> Settings {
     STATE.with(|state| state.borrow().as_ref().map(|state| state.current.clone())).unwrap_or_default()
 }

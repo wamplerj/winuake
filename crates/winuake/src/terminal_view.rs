@@ -198,6 +198,7 @@ impl TerminalView {
             }
         })?);
         std::mem::forget(self.control.PointerMoved(move |_, args| {
+            crate::workspace_host::pointer_over_terminal(id);
             if let Some(args) = args.as_ref() {
                 with_view(id, |view| view.handle_pointer_moved(args));
             }
