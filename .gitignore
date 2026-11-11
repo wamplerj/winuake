@@ -16,6 +16,7 @@ packages/
 /crates/winuake/src/composition.rs
 /crates/winuake/src/graphics.rs
 /crates/winuake-term/src/conpty_bindings.rs
+/crates/winuake-render/src/gpu_bindings.rs
 
 # Coverage
 *.profraw

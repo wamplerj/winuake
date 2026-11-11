@@ -111,6 +111,75 @@ const CONPTY_FILTERS: &[&str] = &[
     "INFINITE",
 ];
 
+/// Direct3D 11 / DXGI / Direct2D / DirectWrite used by the terminal renderer in `winuake-render`.
+const RENDER_FILTERS: &[&str] = &[
+    "D3D11CreateDevice",
+    "ID3D11Device",
+    "ID3D11DeviceContext",
+    "ID3D11Texture2D",
+    "ID3D11Resource",
+    "D3D11_TEXTURE2D_DESC",
+    "D3D11_USAGE_STAGING",
+    "D3D11_CPU_ACCESS_READ",
+    "D3D11_MAP_READ",
+    "D3D11_MAPPED_SUBRESOURCE",
+    "D3D11_SDK_VERSION",
+    "D3D11_CREATE_DEVICE_BGRA_SUPPORT",
+    "D3D_DRIVER_TYPE_HARDWARE",
+    "D3D_DRIVER_TYPE_WARP",
+    "IDXGIDevice",
+    "IDXGIAdapter",
+    "IDXGIObject",
+    "IDXGIFactory2",
+    "IDXGISwapChain1",
+    "IDXGISwapChain",
+    "IDXGIDeviceSubObject",
+    "IDXGISurface",
+    "DXGI_SWAP_CHAIN_DESC1",
+    "DXGI_USAGE_RENDER_TARGET_OUTPUT",
+    "DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL",
+    "DXGI_SCALING_STRETCH",
+    "DXGI_ALPHA_MODE_PREMULTIPLIED",
+    "DXGI_FORMAT_B8G8R8A8_UNORM",
+    "D2D1CreateFactory",
+    "ID2D1Factory1",
+    "ID2D1Device",
+    "ID2D1DeviceContext",
+    "ID2D1RenderTarget",
+    "ID2D1Bitmap1",
+    "ID2D1SolidColorBrush",
+    "ID2D1Brush",
+    "D2D1_BITMAP_PROPERTIES1",
+    "D2D1_FACTORY_TYPE_SINGLE_THREADED",
+    "D2D1_DEVICE_CONTEXT_OPTIONS_NONE",
+    "D2D1_BITMAP_OPTIONS_TARGET",
+    "D2D1_BITMAP_OPTIONS_CANNOT_DRAW",
+    "D2D1_ANTIALIAS_MODE_ALIASED",
+    "D2D1_ANTIALIAS_MODE_PER_PRIMITIVE",
+    "D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE",
+    "D2D1_DRAW_TEXT_OPTIONS_NONE",
+    "D2D1_DRAW_TEXT_OPTIONS_CLIP",
+    "D2D_RECT_F",
+    "D3DCOLORVALUE",
+    "D2D1_PIXEL_FORMAT",
+    "D2D1_ALPHA_MODE_PREMULTIPLIED",
+    "D2D1_BRUSH_PROPERTIES",
+    "DWriteCreateFactory",
+    "IDWriteFactory",
+    "IDWriteTextFormat",
+    "IDWriteTextLayout",
+    "IDWriteFontCollection",
+    "DWRITE_FONT_WEIGHT_NORMAL",
+    "DWRITE_FONT_WEIGHT_BOLD",
+    "DWRITE_FONT_STYLE_NORMAL",
+    "DWRITE_FONT_STYLE_ITALIC",
+    "DWRITE_FONT_STRETCH_NORMAL",
+    "DWRITE_FACTORY_TYPE_SHARED",
+    "DWRITE_WORD_WRAPPING_NO_WRAP",
+    "DWRITE_TEXT_METRICS",
+    "DWRITE_LINE_METRICS",
+];
+
 const COMPOSITION_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.Application",
     "Microsoft.UI.Xaml.IApplicationFactory",
@@ -157,7 +226,15 @@ pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
     conpty.input_default().output(&conpty_output).filters(CONPTY_FILTERS.iter().copied()).flat();
     conpty.write();
 
-    eprintln!("wrote bindings.rs, composition.rs, graphics.rs, conpty_bindings.rs from {} winmd files", metadata.len());
+    let render_output = workspace_root.join("crates").join("winuake-render").join("src").join("gpu_bindings.rs");
+    let mut render = windows_bindgen::builder();
+    render.input_default().output(&render_output).filters(RENDER_FILTERS.iter().copied()).flat();
+    render.write();
+
+    eprintln!(
+        "wrote bindings.rs, composition.rs, graphics.rs, conpty_bindings.rs, gpu_bindings.rs from {} winmd files",
+        metadata.len()
+    );
     Ok(())
 }
 

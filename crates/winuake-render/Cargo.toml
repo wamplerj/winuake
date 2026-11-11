@@ -6,3 +6,10 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+winuake-term = { version = "0.1.0", path = "../winuake-term" }
+
+[target."cfg(windows)".dependencies]
+windows-core = "0.100.0"
+windows-numerics = "0.100.0"
