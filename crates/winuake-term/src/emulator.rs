@@ -1,11 +1,14 @@
 //! VT emulation: bytes from the shell in, screen state and terminal events out. Wraps `alacritty_terminal`.
 
+use crate::input::{InputModes, MouseReporting};
 use crate::pty::TerminalSize;
+use crate::snapshot::{self, ScreenSnapshot};
 use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{Config, Term};
+use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::Processor;
 use std::sync::mpsc::{self, Receiver, Sender};
 
@@ -25,6 +28,42 @@ pub enum TerminalEvent {
 pub struct CursorPosition {
     pub row: usize,
     pub column: usize,
+}
+
+/// A cell in the visible area, zero-based from the top-left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewportCell {
+    pub row: usize,
+    pub column: usize,
+}
+
+/// Which half of a cell the pointer is in; decides whether the cell is included at a selection edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellSide {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionKind {
+    /// Character by character, wrapping across lines.
+    Simple,
+    /// Rectangular.
+    Block,
+    /// Whole words (double-click).
+    Word,
+    /// Whole lines (triple-click).
+    Line,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollRequest {
+    /// Positive scrolls toward older output.
+    Lines(i32),
+    PageUp,
+    PageDown,
+    Top,
+    Bottom,
 }
 
 struct EventForwarder {
@@ -129,6 +168,85 @@ impl TerminalEmulator {
         rows.join("\n")
     }
 
+    /// Mode flags that change how input must be encoded.
+    pub fn input_modes(&self) -> InputModes {
+        let mode = *self.term.mode();
+        let mouse_reporting = if mode.contains(TermMode::MOUSE_MOTION) {
+            MouseReporting::Motion
+        } else if mode.contains(TermMode::MOUSE_DRAG) {
+            MouseReporting::Drag
+        } else if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
+            MouseReporting::Click
+        } else {
+            MouseReporting::Off
+        };
+        InputModes {
+            application_cursor_keys: mode.contains(TermMode::APP_CURSOR),
+            bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
+            mouse_reporting,
+            sgr_mouse: mode.contains(TermMode::SGR_MOUSE),
+            focus_reporting: mode.contains(TermMode::FOCUS_IN_OUT),
+            alternate_scroll: mode.contains(TermMode::ALTERNATE_SCROLL),
+            alternate_screen: mode.contains(TermMode::ALT_SCREEN),
+        }
+    }
+
+    pub fn scroll_view(&mut self, request: ScrollRequest) {
+        self.term.scroll_display(match request {
+            ScrollRequest::Lines(lines) => Scroll::Delta(lines),
+            ScrollRequest::PageUp => Scroll::PageUp,
+            ScrollRequest::PageDown => Scroll::PageDown,
+            ScrollRequest::Top => Scroll::Top,
+            ScrollRequest::Bottom => Scroll::Bottom,
+        });
+    }
+
+    /// Lines the view is scrolled back from the live screen.
+    pub fn display_offset(&self) -> usize {
+        self.term.grid().display_offset()
+    }
+
+    pub fn start_selection(&mut self, kind: SelectionKind, cell: ViewportCell, side: CellSide) {
+        let selection_type = match kind {
+            SelectionKind::Simple => SelectionType::Simple,
+            SelectionKind::Block => SelectionType::Block,
+            SelectionKind::Word => SelectionType::Semantic,
+            SelectionKind::Line => SelectionType::Lines,
+        };
+        self.term.selection = Some(Selection::new(selection_type, self.grid_point(cell), grid_side(side)));
+    }
+
+    pub fn update_selection(&mut self, cell: ViewportCell, side: CellSide) {
+        let point = self.grid_point(cell);
+        if let Some(selection) = self.term.selection.as_mut() {
+            selection.update(point, grid_side(side));
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.term.selection = None;
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.term.selection.as_ref().is_some_and(|selection| !selection.is_empty())
+    }
+
+    /// Selected text, or `None` when nothing is selected.
+    pub fn selection_text(&self) -> Option<String> {
+        self.term.selection_to_string().filter(|text| !text.is_empty())
+    }
+
+    /// What is on screen now, including scrollback position, cursor and selection.
+    pub fn snapshot(&self) -> ScreenSnapshot {
+        snapshot::capture(&self.term, self.columns(), self.rows(), self.scrollback_line_count())
+    }
+
+    fn grid_point(&self, cell: ViewportCell) -> Point {
+        let row = cell.row.min(self.rows().saturating_sub(1)) as i32;
+        let column = cell.column.min(self.columns().saturating_sub(1));
+        Point::new(Line(row - self.display_offset() as i32), Column(column))
+    }
+
     fn translate_event(event: Event) -> Option<TerminalEvent> {
         match event {
             Event::Title(title) => Some(TerminalEvent::TitleChanged(title)),
@@ -140,9 +258,17 @@ impl TerminalEmulator {
     }
 }
 
+fn grid_side(side: CellSide) -> Side {
+    match side {
+        CellSide::Left => Side::Left,
+        CellSide::Right => Side::Right,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot::{CellColor, CursorStyle, SnapshotCell, UnderlineStyle};
 
     fn emulator(columns: u16, rows: u16) -> TerminalEmulator {
         TerminalEmulator::new(TerminalSize::new(columns, rows), 100)
@@ -240,5 +366,182 @@ mod tests {
     fn given_zero_sized_terminal_when_created_then_it_is_clamped_to_one_cell() {
         let terminal = emulator(0, 0);
         assert_eq!((terminal.columns(), terminal.rows()), (1, 1));
+    }
+
+    fn cell(row: usize, column: usize) -> ViewportCell {
+        ViewportCell { row, column }
+    }
+
+    #[test]
+    fn given_mode_switching_sequences_when_advancing_then_input_modes_follow() {
+        let mut terminal = emulator(20, 5);
+        assert_eq!(
+            terminal.input_modes(),
+            InputModes { alternate_scroll: true, ..InputModes::default() },
+            "alternate scroll is on by default"
+        );
+
+        terminal.advance(b"\x1b[?1h\x1b[?2004h\x1b[?1000h\x1b[?1006h\x1b[?1004h");
+        let modes = terminal.input_modes();
+        assert!(modes.application_cursor_keys && modes.bracketed_paste && modes.sgr_mouse && modes.focus_reporting);
+        assert_eq!(modes.mouse_reporting, MouseReporting::Click);
+
+        terminal.advance(b"\x1b[?1002h");
+        assert_eq!(terminal.input_modes().mouse_reporting, MouseReporting::Drag);
+        terminal.advance(b"\x1b[?1003h");
+        assert_eq!(terminal.input_modes().mouse_reporting, MouseReporting::Motion);
+        terminal.advance(b"\x1b[?1049h");
+        assert!(terminal.input_modes().alternate_screen);
+    }
+
+    #[test]
+    fn given_scrollback_when_scrolling_the_view_then_display_offset_and_snapshot_move() {
+        let mut terminal = emulator(10, 2);
+        terminal.advance(b"one\r\ntwo\r\nthree\r\nfour");
+        assert_eq!(terminal.display_offset(), 0);
+
+        terminal.scroll_view(ScrollRequest::Lines(2));
+        let snapshot = terminal.snapshot();
+
+        assert_eq!(terminal.display_offset(), 2);
+        assert_eq!(snapshot.display_offset, 2);
+        assert_eq!(snapshot.cell(0, 0).character, 'o');
+        assert_eq!(snapshot.cell(1, 0).character, 't');
+        assert!(snapshot.cursor.is_none(), "cursor is off screen while scrolled back");
+
+        terminal.scroll_view(ScrollRequest::Bottom);
+        assert_eq!(terminal.display_offset(), 0);
+        terminal.scroll_view(ScrollRequest::Top);
+        assert_eq!(terminal.display_offset(), 2);
+    }
+
+    #[test]
+    fn given_simple_selection_when_dragging_across_text_then_selected_text_is_returned() {
+        let mut terminal = emulator(20, 3);
+        terminal.advance(b"hello world");
+        terminal.start_selection(SelectionKind::Simple, cell(0, 0), CellSide::Left);
+        terminal.update_selection(cell(0, 4), CellSide::Right);
+        assert!(terminal.has_selection());
+        assert_eq!(terminal.selection_text(), Some("hello".to_owned()));
+    }
+
+    #[test]
+    fn given_selection_when_cleared_then_nothing_is_selected() {
+        let mut terminal = emulator(20, 3);
+        terminal.advance(b"hello");
+        terminal.start_selection(SelectionKind::Simple, cell(0, 0), CellSide::Left);
+        terminal.update_selection(cell(0, 2), CellSide::Right);
+        terminal.clear_selection();
+        assert!(!terminal.has_selection());
+        assert_eq!(terminal.selection_text(), None);
+    }
+
+    #[test]
+    fn given_word_selection_when_double_clicking_inside_a_word_then_the_whole_word_is_selected() {
+        let mut terminal = emulator(20, 3);
+        terminal.advance(b"hello world");
+        terminal.start_selection(SelectionKind::Word, cell(0, 7), CellSide::Left);
+        assert_eq!(terminal.selection_text(), Some("world".to_owned()));
+    }
+
+    #[test]
+    fn given_line_selection_when_triple_clicking_then_the_whole_line_is_selected() {
+        let mut terminal = emulator(20, 3);
+        terminal.advance(b"first line\r\nsecond");
+        terminal.start_selection(SelectionKind::Line, cell(0, 3), CellSide::Left);
+        assert_eq!(terminal.selection_text().map(|text| text.trim_end().to_owned()), Some("first line".to_owned()));
+    }
+
+    #[test]
+    fn given_block_selection_when_dragging_a_rectangle_then_only_the_rectangle_is_returned() {
+        let mut terminal = emulator(20, 4);
+        terminal.advance(b"abcdef\r\nghijkl\r\nmnopqr");
+        terminal.start_selection(SelectionKind::Block, cell(0, 1), CellSide::Left);
+        terminal.update_selection(cell(2, 3), CellSide::Right);
+        assert_eq!(terminal.selection_text(), Some("bcd\nhij\nnop".to_owned()));
+    }
+
+    #[test]
+    fn given_scrolled_view_when_selecting_then_viewport_cells_map_to_the_visible_lines() {
+        let mut terminal = emulator(10, 2);
+        terminal.advance(b"one\r\ntwo\r\nthree\r\nfour");
+        terminal.scroll_view(ScrollRequest::Lines(2));
+        terminal.start_selection(SelectionKind::Simple, cell(0, 0), CellSide::Left);
+        terminal.update_selection(cell(0, 2), CellSide::Right);
+        assert_eq!(terminal.selection_text(), Some("one".to_owned()));
+    }
+
+    #[test]
+    fn given_out_of_range_cell_when_selecting_then_it_is_clamped_to_the_screen() {
+        let mut terminal = emulator(5, 2);
+        terminal.advance(b"abcde");
+        terminal.start_selection(SelectionKind::Simple, cell(0, 0), CellSide::Left);
+        terminal.update_selection(cell(99, 99), CellSide::Right);
+        assert!(terminal.selection_text().is_some());
+    }
+
+    #[test]
+    fn given_selection_when_snapshotting_then_selected_cells_are_flagged() {
+        let mut terminal = emulator(10, 2);
+        terminal.advance(b"abcd");
+        terminal.start_selection(SelectionKind::Simple, cell(0, 1), CellSide::Left);
+        terminal.update_selection(cell(0, 2), CellSide::Right);
+        let snapshot = terminal.snapshot();
+        let selected: Vec<bool> = (0..4).map(|column| snapshot.cell(0, column).selected).collect();
+        assert_eq!(selected, vec![false, true, true, false]);
+    }
+
+    #[test]
+    fn given_colors_and_attributes_when_snapshotting_then_cells_carry_them() {
+        let mut terminal = emulator(30, 3);
+        terminal.advance(b"\x1b[31mR\x1b[38;5;200mP\x1b[38;2;1;2;3mT\x1b[0;1;3;4mB\x1b[0;7mI\x1b[0;44mG\x1b[0m.");
+        let snapshot = terminal.snapshot();
+
+        assert_eq!(snapshot.cell(0, 0).foreground, CellColor::Indexed(1));
+        assert_eq!(snapshot.cell(0, 1).foreground, CellColor::Indexed(200));
+        assert_eq!(snapshot.cell(0, 2).foreground, CellColor::Rgb { red: 1, green: 2, blue: 3 });
+        let styled = snapshot.cell(0, 3).attributes;
+        assert!(styled.bold && styled.italic);
+        assert_eq!(styled.underline, UnderlineStyle::Single);
+        assert!(snapshot.cell(0, 4).attributes.inverse);
+        assert_eq!(snapshot.cell(0, 5).background, CellColor::Indexed(4));
+        assert_eq!(snapshot.cell(0, 6).foreground, CellColor::DefaultForeground);
+        assert_eq!(snapshot.cell(0, 6).background, CellColor::DefaultBackground);
+        assert_eq!(snapshot.cell(1, 0), &SnapshotCell::BLANK);
+    }
+
+    #[test]
+    fn given_wide_character_when_snapshotting_then_first_cell_is_wide_and_second_is_a_spacer() {
+        let mut terminal = emulator(10, 2);
+        terminal.advance("世a".as_bytes());
+        let snapshot = terminal.snapshot();
+        assert_eq!(snapshot.cell(0, 0).character, '世');
+        assert!(snapshot.cell(0, 0).attributes.wide);
+        assert!(snapshot.cell(0, 1).attributes.wide_spacer);
+        assert_eq!(snapshot.cell(0, 2).character, 'a');
+    }
+
+    #[test]
+    fn given_cursor_visibility_and_style_sequences_when_snapshotting_then_cursor_reflects_them() {
+        let mut terminal = emulator(10, 3);
+        terminal.advance(b"ab");
+        let cursor = terminal.snapshot().cursor.expect("cursor visible");
+        assert_eq!((cursor.row, cursor.column, cursor.style), (0, 2, CursorStyle::Block));
+
+        terminal.advance(b"\x1b[6 q");
+        assert_eq!(terminal.snapshot().cursor.unwrap().style, CursorStyle::Beam);
+        terminal.advance(b"\x1b[4 q");
+        assert_eq!(terminal.snapshot().cursor.unwrap().style, CursorStyle::Underline);
+
+        terminal.advance(b"\x1b[?25l");
+        assert_eq!(terminal.snapshot().cursor, None);
+    }
+
+    #[test]
+    fn given_snapshot_when_reading_rows_then_row_slices_match_the_grid_dimensions() {
+        let terminal = emulator(7, 3);
+        let snapshot = terminal.snapshot();
+        assert_eq!((snapshot.columns, snapshot.rows, snapshot.cells.len()), (7, 3, 21));
+        assert_eq!(snapshot.row(2).len(), 7);
     }
 }
