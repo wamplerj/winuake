@@ -1,14 +1,15 @@
 //! Phase 0 spike: prove WinUI 3 runs from Rust. Throwaway; replaced by the real app shell in Phase 3.
 
 use crate::bindings::{
-    Application, ApplicationInitializationCallback, Button, Grid, PropertyValue, SwapChainPanel, TabView, TabViewItem,
-    TextBlock, TypeKind as BindingsTypeKind, TypeName as BindingsTypeName, UIElement, Window, XamlControlsResources,
+    Application, ApplicationInitializationCallback, PropertyValue, SwapChainPanel, TabView, TabViewItem,
+    TypeKind as BindingsTypeKind, TypeName as BindingsTypeName, Window, XamlControlsResources,
     XamlControlsXamlMetaDataProvider,
 };
 use crate::composition::{
     Application as ComposedApplication, IApplicationOverrides, IApplicationOverrides_Impl, IXamlMetadataProvider,
     IXamlMetadataProvider_Impl, IXamlType, LaunchActivatedEventArgs, TypeName, XmlnsDefinition,
 };
+use crate::swap_chain_clear::attach_cleared_swap_chain;
 use windows_core::{Array, HSTRING, Interface, Ref, Result, implement};
 
 /// Application subclass. Delegates XAML type lookup for built-in WinUI controls to the framework's own provider.
@@ -64,26 +65,18 @@ fn build_window() -> Result<()> {
     let window = Window::new()?;
     window.SetTitle(&HSTRING::from("Winuake spike"))?;
 
-    let layout = Grid::new()?;
-    let children = layout.Children()?;
-
     let tabs = TabView::new()?;
     let tab = TabViewItem::new()?;
     tab.SetHeader(&PropertyValue::CreateString(&HSTRING::from("Terminal 1"))?)?;
-    let label = TextBlock::new()?;
-    label.SetText(&HSTRING::from("WinUI 3 from Rust"))?;
-    tab.SetContent(&label)?;
+
+    let terminal_surface = SwapChainPanel::new()?;
+    terminal_surface.SetWidth(1280.0)?;
+    terminal_surface.SetHeight(720.0)?;
+    attach_cleared_swap_chain(&terminal_surface, 1280, 720, [0.05, 0.35, 0.40, 1.0])?;
+    tab.SetContent(&terminal_surface)?;
     tabs.TabItems()?.Append(&tab)?;
-    children.Append(&tabs.cast::<UIElement>()?)?;
 
-    let button = Button::new()?;
-    button.SetContent(&PropertyValue::CreateString(&HSTRING::from("Button"))?)?;
-    children.Append(&button.cast::<UIElement>()?)?;
-
-    let swap_chain_panel = SwapChainPanel::new()?;
-    children.Append(&swap_chain_panel.cast::<UIElement>()?)?;
-
-    window.SetContent(&layout)?;
+    window.SetContent(&tabs)?;
     window.Activate()
 }
 

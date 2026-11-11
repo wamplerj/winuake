@@ -9,7 +9,12 @@ mod bootstrap;
 #[allow(warnings, clippy::all)]
 mod composition;
 #[cfg(windows)]
+#[allow(warnings, clippy::all)]
+mod graphics;
+#[cfg(windows)]
 mod spike;
+#[cfg(windows)]
+mod swap_chain_clear;
 
 #[cfg(windows)]
 fn main() -> windows_core::Result<()> {

@@ -24,6 +24,7 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.Controls.TabViewItem::{CreateInstance, put_Header}",
     "Microsoft.UI.Xaml.Controls.TextBlock::{CreateInstance, put_Text}",
     "Microsoft.UI.Xaml.Controls.SwapChainPanel::CreateInstance",
+    "Microsoft.UI.Xaml.FrameworkElement::{put_Width, put_Height}",
     "Microsoft.UI.Xaml.XamlTypeInfo.XamlControlsXamlMetaDataProvider::CreateInstance",
     "Microsoft.UI.Xaml.XamlTypeInfo.IXamlControlsXamlMetaDataProviderStatics",
     "Microsoft.UI.Xaml.Markup.IXamlMetadataProvider::{GetXamlType, GetXamlTypeByFullName, GetXmlnsDefinitions}",
@@ -59,6 +60,31 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.IUIElementStatics",
     "Microsoft.UI.Xaml.IWindowStatics",
     "Microsoft.UI.Xaml.Controls.IXamlControlsResourcesStatics",
+];
+
+/// Win32 graphics used to render into a `SwapChainPanel`.
+const GRAPHICS_FILTERS: &[&str] = &[
+    "D3D11CreateDevice",
+    "ID3D11Device",
+    "ID3D11DeviceContext",
+    "ID3D11Texture2D",
+    "ID3D11RenderTargetView",
+    "D3D11_SDK_VERSION",
+    "D3D11_CREATE_DEVICE_BGRA_SUPPORT",
+    "D3D_DRIVER_TYPE_HARDWARE",
+    "IDXGIDevice",
+    "IDXGIAdapter",
+    "IDXGIObject",
+    "IDXGIFactory2",
+    "IDXGISwapChain1",
+    "IDXGISwapChain",
+    "IDXGIDeviceSubObject",
+    "DXGI_SWAP_CHAIN_DESC1",
+    "DXGI_USAGE_RENDER_TARGET_OUTPUT",
+    "DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL",
+    "DXGI_SCALING_STRETCH",
+    "DXGI_ALPHA_MODE_PREMULTIPLIED",
+    "DXGI_FORMAT_B8G8R8A8_UNORM",
 ];
 
 const COMPOSITION_FILTERS: &[&str] = &[
@@ -97,12 +123,12 @@ pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
         .implement("Microsoft.UI.Xaml.Markup.IXamlMetadataProvider");
     composition.write();
 
-    eprintln!(
-        "wrote {} and {} from {} winmd files",
-        ergonomic_output.display(),
-        composition_output.display(),
-        metadata.len()
-    );
+    let graphics_output = source_directory.join("graphics.rs");
+    let mut graphics = windows_bindgen::builder();
+    graphics.input_default().output(&graphics_output).filters(GRAPHICS_FILTERS.iter().copied()).flat();
+    graphics.write();
+
+    eprintln!("wrote bindings.rs, composition.rs, graphics.rs from {} winmd files", metadata.len());
     Ok(())
 }
 
