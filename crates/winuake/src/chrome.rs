@@ -136,7 +136,7 @@ fn press(element: &UIElement, action: impl Fn() + Send + 'static) -> Result<()> 
 impl Chrome {
     pub fn create() -> Result<Self> {
         let markup = format!(
-            r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Background="#FF1E1E1E">
+            r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Background="#00000000">
   <Grid.RowDefinitions>
     <RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
   </Grid.RowDefinitions>

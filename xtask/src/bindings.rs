@@ -65,6 +65,11 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.Controls.Primitives.IToggleButtonStatics",
     "Microsoft.UI.Xaml.Window::{Close, add_Closed}",
     "Windows.Foundation.IReference",
+    // Phase 7: translucent window backdrop.
+    "Microsoft.UI.Xaml.Window::{get_SystemBackdrop, put_SystemBackdrop}",
+    "Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop::CreateInstance",
+    "Microsoft.UI.Xaml.Media.ISystemBackdropFactory",
+    "Microsoft.UI.Xaml.Media.IDesktopAcrylicBackdropFactory",
     "Microsoft.UI.Xaml.IDependencyPropertyStatics",
     "Microsoft.UI.Xaml.IPropertyMetadataFactory",
     "Microsoft.UI.Xaml.IPropertyMetadataStatics",

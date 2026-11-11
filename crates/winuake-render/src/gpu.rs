@@ -66,6 +66,21 @@ impl PixelImage {
     }
 }
 
+/// How the terminal's default background is drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BackgroundStyle {
+    /// Replaces the color scheme's background when set.
+    pub color: Option<Rgb>,
+    /// 1.0 is opaque. Lower values let the window backdrop show through (the swap chain is premultiplied alpha).
+    pub opacity: f32,
+}
+
+impl Default for BackgroundStyle {
+    fn default() -> Self {
+        Self { color: None, opacity: 1.0 }
+    }
+}
+
 pub struct TerminalRenderer {
     d3d_device: ID3D11Device,
     d3d_context: ID3D11DeviceContext,
@@ -81,6 +96,8 @@ pub struct TerminalRenderer {
     metrics: CellMetrics,
     width_px: u32,
     height_px: u32,
+    /// Translucent window: the default background drawn in this color (instead of the scheme's) at this opacity.
+    background: BackgroundStyle,
 }
 
 impl TerminalRenderer {
@@ -128,6 +145,7 @@ impl TerminalRenderer {
                 font_size_points: font.size_points,
                 text_formats,
                 metrics,
+                background: BackgroundStyle::default(),
                 width_px,
                 height_px,
             };
@@ -189,6 +207,10 @@ impl TerminalRenderer {
     }
 
     /// Draws `snapshot` and presents it.
+    pub fn set_background(&mut self, background: BackgroundStyle) {
+        self.background = background;
+    }
+
     pub fn render(&mut self, snapshot: &ScreenSnapshot, scheme: &ColorScheme, cursor_visible: bool) -> Result<()> {
         unsafe {
             self.draw(snapshot, scheme, cursor_visible)?;
@@ -241,7 +263,7 @@ impl TerminalRenderer {
         unsafe {
             dc.BeginDraw();
             dc.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-            dc.Clear(Some(&color_f(scheme.background)));
+            dc.Clear(Some(&premultiplied(self.background.color.unwrap_or(scheme.background), self.background.opacity)));
 
             // Backgrounds, coalesced into horizontal runs. Aliased so neighbouring rectangles do not leave seams.
             dc.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
@@ -476,6 +498,17 @@ fn text_format_index(cell: &SnapshotCell) -> usize {
 
 fn rect(left: f32, top: f32, right: f32, bottom: f32) -> D2D_RECT_F {
     D2D_RECT_F { left, top, right, bottom }
+}
+
+/// Color with `opacity`, premultiplied as the swap chain expects.
+fn premultiplied(color: Rgb, opacity: f32) -> D2D_COLOR_F {
+    let opacity = opacity.clamp(0.0, 1.0);
+    D2D_COLOR_F {
+        r: f32::from(color.red) / 255.0 * opacity,
+        g: f32::from(color.green) / 255.0 * opacity,
+        b: f32::from(color.blue) / 255.0 * opacity,
+        a: opacity,
+    }
 }
 
 fn color_f(color: Rgb) -> D2D_COLOR_F {

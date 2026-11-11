@@ -140,6 +140,12 @@ impl TerminalView {
         Ok(view)
     }
 
+    /// Translucency: draws the default background in another color and opacity, then redraws.
+    pub fn set_background(&self, style: winuake_render::gpu::BackgroundStyle) {
+        self.render.borrow_mut().renderer.set_background(style);
+        self.redraw();
+    }
+
     pub fn set_monitoring(&self, activity: bool, silence: bool) {
         self.session.set_monitoring_activity(activity);
         self.session.set_monitoring_silence(silence);

@@ -82,6 +82,21 @@ pub fn quit() {
     }
 }
 
+/// Turns the translucent (acrylic) window backdrop on or off. The terminals draw their background with matching opacity.
+pub fn set_translucent(translucent: bool) {
+    MAIN_WINDOW.with(|slot| {
+        let Some(window) = slot.borrow().clone() else { return };
+        let result = if translucent {
+            crate::bindings::DesktopAcrylicBackdrop::new().and_then(|backdrop| window.SetSystemBackdrop(&backdrop))
+        } else {
+            window.SetSystemBackdrop(None::<&crate::bindings::SystemBackdrop>)
+        };
+        if let Err(error) = result {
+            tracing::warn!(%error, translucent, "could not change the window backdrop");
+        }
+    });
+}
+
 /// `XamlControlsResources` must be merged inside `OnLaunched`; doing it earlier crashes XAML.
 fn merge_control_resources() -> Result<()> {
     Application::Current()?.Resources()?.MergedDictionaries()?.Append(&XamlControlsResources::new()?)
@@ -117,6 +132,7 @@ fn open_main_window() -> Result<()> {
     }
 
     MAIN_WINDOW.with(|slot| *slot.borrow_mut() = Some(window));
+    set_translucent(settings.appearance.translucency);
     crate::first_run::show_if_first_run();
     Ok(())
 }

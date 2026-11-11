@@ -73,6 +73,7 @@ pub struct WorkspaceHost {
     content: ContentControl,
     sessions: RefCell<HashMap<SessionId, SessionView>>,
     profile: RefCell<Profile>,
+    background: RefCell<winuake_render::gpu::BackgroundStyle>,
     schemes: RefCell<Vec<NamedScheme>>,
     chrome: Chrome,
 }
@@ -89,6 +90,7 @@ impl WorkspaceHost {
             content,
             sessions: RefCell::new(HashMap::new()),
             profile: RefCell::new(settings.active_profile()),
+            background: RefCell::new(background_style(settings)),
             schemes: RefCell::new(load_schemes()),
             chrome,
         });
@@ -204,6 +206,7 @@ impl WorkspaceHost {
         let font = FontSpec { family: profile.font_family.clone(), size_points: profile.font_size_points };
         let scheme = self.scheme_for(&profile);
         let view = TerminalView::create(started.session, &font, scheme, profile.cursor_blink, self.window_handle)?;
+        view.set_background(*self.background.borrow());
         let sessions = self.sessions.borrow();
         let Some(session_view) = sessions.get(&session) else { return Ok(()) };
         let element = view.element();
@@ -506,6 +509,17 @@ fn shortcut_map(settings: &Settings) -> ShortcutMap {
     outcome.map
 }
 
+fn background_style(settings: &Settings) -> winuake_render::gpu::BackgroundStyle {
+    let appearance = &settings.appearance;
+    if !appearance.translucency {
+        return winuake_render::gpu::BackgroundStyle::default();
+    }
+    winuake_render::gpu::BackgroundStyle {
+        color: winuake_render::scheme_catalog::parse_hex_color(&appearance.background_color),
+        opacity: f32::from(appearance.background_color_opacity) / 100.0,
+    }
+}
+
 /// New settings arrived: update the workspace behavior, shortcut table and chrome.
 pub fn apply_settings(settings: &Settings) {
     let Some(host) = host() else { return };
@@ -516,6 +530,16 @@ pub fn apply_settings(settings: &Settings) {
     *host.schemes.borrow_mut() = load_schemes();
     host.chrome.apply_appearance(settings, &host);
     host.chrome.apply_bar_visibility(&settings.window);
+    let style = background_style(settings);
+    if *host.background.borrow() != style {
+        *host.background.borrow_mut() = style;
+        crate::application::set_translucent(settings.appearance.translucency);
+        for terminal in host.workspace.borrow().stack().terminal_ids() {
+            if let Some(view) = terminal_view::find(terminal) {
+                view.set_background(style);
+            }
+        }
+    }
 }
 
 pub fn run_action(action: Action) {

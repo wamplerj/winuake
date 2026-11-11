@@ -19,25 +19,25 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | Window | ShowTabBar | done | 5 | Settings window |
 | Window | DynamicTabTitles | done | 5 | Applies live |
 | Window | ShowSystrayIcon | done | 3 | Stock icon until Phase 9 assets; left click toggles, right click menu |
-| Behavior | FocusFollowsMouse | partial | 5 | Stored and editable; behavior in phase 7 |
+| Behavior | FocusFollowsMouse | done | 7 | |
 | Behavior | OpenAfterStart | done | 3 |  |
 | Behavior | RememberFullscreen | done | 3 |  |
 | Appearance | Skin | done | 6 | Skins page of the settings window; switches live |
 | Appearance | SkinInstalledWithKns | n/a | 6 | KNewStuff does not exist on Windows; skins install from an archive file instead |
-| Appearance | Translucency | partial | 5 | Stored and editable; effect in phase 7 |
-| Appearance | BackgroundColor | partial | 5 | Stored and editable; effect in phase 7 |
-| Appearance | BackgroundColorOpacity | partial | 5 | Stored and editable; effect in phase 7 |
-| Appearance | TerminalHighlightOnManualActivation | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | Translucency | done | 7 | Acrylic backdrop; terminals draw their default background with the chosen opacity |
+| Appearance | BackgroundColor | done | 7 | |
+| Appearance | BackgroundColorOpacity | done | 7 | |
+| Appearance | TerminalHighlightOnManualActivation | done | 7 | Highlight color is Breeze blue, not the desktop palette |
 | Appearance | HideSkinBorders | done | 6 | |
-| Appearance | TerminalHighlightOpacity | partial | 5 | Stored and editable; effect in phase 7 |
-| Appearance | TerminalHighlightDuration | partial | 5 | Stored and editable; effect in phase 7 |
-| Appearance | KeyboardInputBlockIndicatorColor | partial | 5 | Stored and editable; effect in phase 7 |
-| Appearance | KeyboardInputBlockIndicatorOpacity | partial | 5 | Stored and editable; effect in phase 7 |
-| Appearance | KeyboardInputBlockIndicatorDuration | partial | 5 | Stored and editable; effect in phase 7 |
+| Appearance | TerminalHighlightOpacity | done | 7 | |
+| Appearance | TerminalHighlightDuration | done | 7 | |
+| Appearance | KeyboardInputBlockIndicatorColor | done | 7 | |
+| Appearance | KeyboardInputBlockIndicatorOpacity | done | 7 | |
+| Appearance | KeyboardInputBlockIndicatorDuration | done | 7 | |
 | Animation | UseWMAssist | n/a |  | KWin effect; the Windows slide uses a clipped window region |
 | Animation | Frames | done | 3 | 10 ms per frame, linear, 0 = instant |
-| AutoOpen | PollMouse | partial | 5 | Stored and editable; behavior in phase 7 |
-| AutoOpen | PollInterval | partial | 5 | Stored and editable; behavior in phase 7 |
+| AutoOpen | PollMouse | done | 7 | Pointer on the top row of the work area within the window span |
+| AutoOpen | PollInterval | done | 7 | |
 | Dialogs | FirstRun | done | 5 | Asks for the global hotkey once; saved as `toggle_hotkey` |
 | Dialogs | ConfirmQuit | done | 5 | |
 
@@ -73,9 +73,9 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `split-left-right` | done | 4 | Ctrl+( |
 | `split-top-bottom` | done | 4 | Ctrl+); Windows may reserve Ctrl+Shift+0, so it can fail to arrive (rebind in phase 5) |
 | `switch-to-session-%1` | done | 4 | Alt+1..9, Alt+0; by tab position |
-| `toggle-session-keyboard-input` | partial | 4 | Input is blocked; the overlay indicator arrives in phase 7 |
-| `toggle-session-monitor-activity` | partial | 4 | State kept; notifications arrive in phase 7 |
-| `toggle-session-monitor-silence` | partial | 4 | State kept; notifications arrive in phase 7 |
+| `toggle-session-keyboard-input` | done | 7 | Blocks input and flashes the indicator |
+| `toggle-session-monitor-activity` | done | 7 | Tray balloon (toast); needs the tray icon enabled |
+| `toggle-session-monitor-silence` | done | 7 | Tray balloon after 10 s of silence |
 | `toggle-session-prevent-closing` | done | 4 | Tab menu; lock icon on the tab |
 | `toggle-titlebar` | done | 4 | Ctrl+Shift+M |
 | `toggle-window-state` | done | 3 | Global hotkey (F12 if Windows allows it, else Win+`, Ctrl+`, Ctrl+Alt+`), tray icon, starting a second instance |

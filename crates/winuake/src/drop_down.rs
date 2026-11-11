@@ -404,7 +404,7 @@ impl DropDownHost {
     fn check_displays(&self) {
         let ticks = self.display_check_ticks.get() + 1;
         self.display_check_ticks.set(ticks);
-        if ticks % 10 != 0 {
+        if !ticks.is_multiple_of(10) {
             return;
         }
         let monitors = enumerate_monitors();
