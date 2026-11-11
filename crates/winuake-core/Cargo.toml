@@ -6,3 +6,6 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+winuake-config = { version = "0.1.0", path = "../winuake-config" }

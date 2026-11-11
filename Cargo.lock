@@ -1394,6 +1394,9 @@ version = "0.1.0"
 [[package]]
 name = "winuake-core"
 version = "0.1.0"
+dependencies = [
+ "winuake-config",
+]
 
 [[package]]
 name = "winuake-ipc"
