@@ -43,6 +43,14 @@ impl Architecture {
         }
     }
 
+    /// Folder of the bootstrap DLL inside the Windows App SDK Foundation package.
+    fn bootstrap_runtime_directory(self) -> &'static str {
+        match self {
+            Architecture::X64 => "win-x64",
+            Architecture::Arm64 => "win-arm64",
+        }
+    }
+
     fn runtime_directory(self) -> &'static str {
         match self {
             Architecture::X64 => "win10-x64",
@@ -189,9 +197,22 @@ fn stage_files(
         .join(architecture.label())
         .join(format!("winuake-{version}-win-{}", architecture.label()));
     fs::create_dir_all(&stage)?;
-    for file in ["winuake.exe", "winuake-cli.exe", "Microsoft.WindowsAppRuntime.Bootstrap.dll"] {
+    for file in ["winuake.exe", "winuake-cli.exe"] {
         fs::copy(build.join(file), stage.join(file)).map_err(|error| format!("{file}: {error}"))?;
     }
+    // The bootstrap DLL comes straight from the Windows App SDK package. The build script also copies it next to the executables, but a
+    // restored build cache can skip that step, so packaging does not depend on it.
+    let bootstrap = workspace_root
+        .join("target")
+        .join("winappsdk")
+        .join(winappsdk::WINDOWS_APP_SDK_VERSION)
+        .join("Foundation")
+        .join("runtimes")
+        .join(architecture.bootstrap_runtime_directory())
+        .join("native")
+        .join("Microsoft.WindowsAppRuntime.Bootstrap.dll");
+    fs::copy(&bootstrap, stage.join("Microsoft.WindowsAppRuntime.Bootstrap.dll"))
+        .map_err(|error| format!("{}: {error}", bootstrap.display()))?;
     copy_directory(&workspace_root.join("assets").join("skins"), &stage.join("skins"))?;
     fs::copy(workspace_root.join("LICENSE"), stage.join("LICENSE"))?;
     fs::copy(workspace_root.join("README.md"), stage.join("README.md"))?;
