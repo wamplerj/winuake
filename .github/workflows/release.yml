@@ -8,6 +8,10 @@ on:
         description: "Version to package (for example 1.0.0)"
         required: true
 
+# Creating the GitHub Release needs write access to repository contents; the default token is read-only.
+permissions:
+  contents: write
+
 jobs:
   package:
     runs-on: windows-latest
