@@ -455,8 +455,12 @@ fn msix_manifest(architecture: Architecture, version: &str) -> String {
 }
 
 fn powershell(script: &str) -> Result<String, Box<dyn Error>> {
-    let output =
-        Command::new("powershell").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]).output()?;
+    // Windows PowerShell 5.1 started from a PowerShell 7 session inherits its module path and then cannot load its own modules
+    // (CI runners hit this), so give it a clean one.
+    let output = Command::new("powershell")
+        .env_remove("PSModulePath")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .output()?;
     if !output.status.success() {
         return Err(format!("powershell: {}", String::from_utf8_lossy(&output.stderr)).into());
     }
