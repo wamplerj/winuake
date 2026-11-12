@@ -350,6 +350,83 @@ impl Settings {
         toml::to_string_pretty(&file).expect("settings always serialize")
     }
 
+    pub fn profile(&self, name: &str) -> Option<&Profile> {
+        self.profiles.iter().find(|profile| profile.name == name)
+    }
+
+    /// Name of the profile new terminals use.
+    pub fn default_profile_name(&self) -> String {
+        self.active_profile().name
+    }
+
+    /// `base`, or `base 2`, `base 3` ... when the name is taken.
+    pub fn unique_profile_name(&self, base: &str) -> String {
+        let base = base.trim();
+        let base = if base.is_empty() { "Profile" } else { base };
+        if self.profile(base).is_none() {
+            return base.to_owned();
+        }
+        (2..)
+            .map(|number| format!("{base} {number}"))
+            .find(|candidate| self.profile(candidate).is_none())
+            .expect("a free name exists")
+    }
+
+    /// Adds a profile with default settings and returns its (made unique) name.
+    pub fn add_profile(&mut self, name: &str) -> String {
+        let name = self.unique_profile_name(name);
+        self.profiles.push(Profile { name: name.clone(), ..Profile::default() });
+        name
+    }
+
+    /// Copies a profile under `<name> copy`. `None` when it does not exist.
+    pub fn duplicate_profile(&mut self, name: &str) -> Option<String> {
+        let source = self.profile(name)?.clone();
+        let copy_name = self.unique_profile_name(&format!("{} copy", source.name));
+        self.profiles.push(Profile { name: copy_name.clone(), ..source });
+        Some(copy_name)
+    }
+
+    /// Deletes a profile. The last profile cannot be deleted; deleting the default makes the first remaining one the default.
+    pub fn delete_profile(&mut self, name: &str) -> bool {
+        if self.profiles.len() <= 1 {
+            return false;
+        }
+        let Some(index) = self.profiles.iter().position(|profile| profile.name == name) else { return false };
+        let was_default = self.default_profile_name() == name;
+        self.profiles.remove(index);
+        if was_default || self.default_profile.as_deref() == Some(name) {
+            self.default_profile = Some(self.profiles[0].name.clone());
+        }
+        true
+    }
+
+    pub fn set_default_profile(&mut self, name: &str) -> bool {
+        if self.profile(name).is_none() {
+            return false;
+        }
+        self.default_profile = Some(name.to_owned());
+        true
+    }
+
+    /// Adds detected profiles that are not already there (same name, or same program and arguments). Returns how many were added.
+    pub fn merge_detected_profiles(&mut self, detected: Vec<Profile>) -> usize {
+        let mut added = 0;
+        for profile in detected {
+            let known = self.profiles.iter().any(|existing| {
+                existing.name == profile.name
+                    || (existing.program.as_deref().map(str::to_lowercase)
+                        == profile.program.as_deref().map(str::to_lowercase)
+                        && existing.arguments == profile.arguments)
+            });
+            if !known {
+                self.profiles.push(profile);
+                added += 1;
+            }
+        }
+        added
+    }
+
     /// The profile new terminals use: the named default, else the first, else built-in defaults.
     pub fn active_profile(&self) -> Profile {
         self.default_profile
@@ -627,5 +704,79 @@ scrollback_lines = "lots"
             assert!(text.contains(group), "missing {group} in:\n{text}");
         }
         assert!(!text.contains("toggle_hotkey"));
+    }
+
+    #[test]
+    fn given_a_taken_name_when_adding_a_profile_then_a_numbered_name_is_used() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.add_profile("Git Bash"), "Git Bash");
+        assert_eq!(settings.add_profile("Git Bash"), "Git Bash 2");
+        assert_eq!(settings.add_profile("  "), "Profile");
+        assert_eq!(settings.profiles.len(), 4);
+    }
+
+    #[test]
+    fn given_a_profile_when_duplicating_then_the_copy_keeps_its_settings_under_a_new_name() {
+        let mut settings = Settings::default();
+        settings.profiles[0].font_size_points = 15.0;
+        assert_eq!(settings.duplicate_profile("Default").as_deref(), Some("Default copy"));
+        assert_eq!(settings.duplicate_profile("Default").as_deref(), Some("Default copy 2"));
+        assert_eq!(settings.profile("Default copy").map(|profile| profile.font_size_points), Some(15.0));
+        assert_eq!(settings.duplicate_profile("nope"), None);
+    }
+
+    #[test]
+    fn given_profiles_when_deleting_then_the_last_one_stays_and_a_deleted_default_is_replaced() {
+        let mut settings = Settings::default();
+        assert!(!settings.delete_profile("Default"), "the last profile stays");
+        settings.add_profile("wsl");
+        settings.set_default_profile("wsl");
+        assert!(settings.delete_profile("wsl"));
+        assert_eq!(settings.default_profile_name(), "Default");
+        assert!(!settings.delete_profile("wsl"));
+    }
+
+    #[test]
+    fn given_profiles_when_setting_the_default_then_unknown_names_are_refused() {
+        let mut settings = Settings::default();
+        settings.add_profile("pwsh");
+        assert!(settings.set_default_profile("pwsh"));
+        assert_eq!(settings.active_profile().name, "pwsh");
+        assert!(!settings.set_default_profile("missing"));
+        assert_eq!(settings.default_profile_name(), "pwsh");
+    }
+
+    #[test]
+    fn given_detected_profiles_when_merging_then_only_new_ones_are_added() {
+        let mut settings = Settings::default();
+        let detected = vec![
+            Profile {
+                name: "Git Bash".into(),
+                program: Some("C:/Git/bin/bash.exe".into()),
+                arguments: vec!["--login".into()],
+                ..Profile::default()
+            },
+            Profile {
+                name: "Other name".into(),
+                program: Some("c:/git/bin/BASH.exe".into()),
+                arguments: vec!["--login".into()],
+                ..Profile::default()
+            },
+            Profile { name: "Default".into(), program: Some("x.exe".into()), ..Profile::default() },
+            Profile { name: "cmd".into(), program: Some("cmd.exe".into()), ..Profile::default() },
+        ];
+        assert_eq!(
+            settings.merge_detected_profiles(detected.clone()),
+            2,
+            "Git Bash and cmd; the duplicate program and the existing name are skipped"
+        );
+        assert_eq!(settings.merge_detected_profiles(detected), 0);
+    }
+
+    #[test]
+    fn given_profile_names_when_looking_up_then_the_profile_is_found() {
+        let settings = Settings::default();
+        assert!(settings.profile("Default").is_some());
+        assert!(settings.profile("x").is_none());
     }
 }

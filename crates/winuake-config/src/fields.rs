@@ -164,6 +164,42 @@ pub fn descriptor(key: &str) -> Option<FieldDescriptor> {
     descriptors().into_iter().find(|candidate| candidate.key == key)
 }
 
+/// A profile's value for a `profile.*` field.
+pub fn profile_value(profile: &crate::profile::Profile, key: &str) -> Option<FieldValue> {
+    Some(match key {
+        "profile.name" => FieldValue::Text(profile.name.clone()),
+        "profile.program" => text(&profile.program),
+        "profile.arguments" => FieldValue::Text(profile.arguments.join(" ")),
+        "profile.working_directory" => text(&profile.working_directory),
+        "profile.font_family" => FieldValue::Text(profile.font_family.clone()),
+        "profile.font_size_points" => FieldValue::Number(profile.font_size_points.round() as i64),
+        "profile.color_scheme" => FieldValue::Text(profile.color_scheme.clone()),
+        "profile.scrollback_lines" => FieldValue::Number(i64::from(profile.scrollback_lines)),
+        "profile.cursor_shape" => FieldValue::Text(format!("{:?}", profile.cursor_shape)),
+        "profile.cursor_blink" => FieldValue::Bool(profile.cursor_blink),
+        _ => return None,
+    })
+}
+
+/// Value of a `profile.*` field for the profile called `name`.
+pub fn read_profile_field(settings: &Settings, name: &str, key: &str) -> Option<FieldValue> {
+    profile_value(settings.profile(name)?, key)
+}
+
+/// Sets a `profile.*` field of the profile called `name`, with the same checks as `write`.
+pub fn write_profile_field(
+    settings: &mut Settings,
+    name: &str,
+    key: &str,
+    value: FieldValue,
+) -> Result<(), FieldError> {
+    let descriptor = descriptor(key)
+        .filter(|candidate| candidate.page == Page::Profile)
+        .ok_or_else(|| bad(key, "not a profile setting"))?;
+    let value = validate(&descriptor, value)?;
+    write_profile(settings, name, key, value)
+}
+
 fn text(value: &Option<String>) -> FieldValue {
     FieldValue::Text(value.clone().unwrap_or_default())
 }
@@ -172,7 +208,9 @@ fn text(value: &Option<String>) -> FieldValue {
 pub fn read(settings: &Settings, key: &str) -> Option<FieldValue> {
     let window = &settings.window;
     let appearance = &settings.appearance;
-    let profile = settings.active_profile();
+    if key.starts_with("profile.") {
+        return profile_value(&settings.active_profile(), key);
+    }
     Some(match key {
         "window.screen" => FieldValue::Number(i64::from(window.screen)),
         "window.width" => FieldValue::Number(i64::from(window.width_percent)),
@@ -219,16 +257,6 @@ pub fn read(settings: &Settings, key: &str) -> Option<FieldValue> {
         "appearance.keyboard_input_block_indicator_duration_ms" => {
             FieldValue::Number(i64::from(appearance.keyboard_input_block_indicator_duration_ms))
         }
-        "profile.name" => FieldValue::Text(profile.name),
-        "profile.program" => text(&profile.program),
-        "profile.arguments" => FieldValue::Text(profile.arguments.join(" ")),
-        "profile.working_directory" => text(&profile.working_directory),
-        "profile.font_family" => FieldValue::Text(profile.font_family),
-        "profile.font_size_points" => FieldValue::Number(profile.font_size_points.round() as i64),
-        "profile.color_scheme" => FieldValue::Text(profile.color_scheme),
-        "profile.scrollback_lines" => FieldValue::Number(i64::from(profile.scrollback_lines)),
-        "profile.cursor_shape" => FieldValue::Text(format!("{:?}", profile.cursor_shape)),
-        "profile.cursor_blink" => FieldValue::Bool(profile.cursor_blink),
         _ => return None,
     })
 }
@@ -300,7 +328,10 @@ pub fn write(settings: &mut Settings, key: &str, value: FieldValue) -> Result<()
         ("appearance.keyboard_input_block_indicator_duration_ms", FieldValue::Number(number)) => {
             appearance.keyboard_input_block_indicator_duration_ms = number as u32
         }
-        (profile_key, value) if profile_key.starts_with("profile.") => write_profile(settings, profile_key, value)?,
+        (profile_key, value) if profile_key.starts_with("profile.") => {
+            let active = settings.active_profile().name;
+            write_profile(settings, &active, profile_key, value)?
+        }
         _ => return Err(bad(key, "the value has the wrong type")),
     }
     Ok(())
@@ -333,13 +364,17 @@ fn validate(descriptor: &FieldDescriptor, value: FieldValue) -> Result<FieldValu
     }
 }
 
-/// Edits the active profile, creating it in the list if the list is empty.
-fn write_profile(settings: &mut Settings, key: &str, value: FieldValue) -> Result<(), FieldError> {
+/// Edits the profile called `target`, creating the default one first if the list is empty.
+fn write_profile(settings: &mut Settings, target: &str, key: &str, value: FieldValue) -> Result<(), FieldError> {
     if settings.profiles.is_empty() {
         settings.profiles.push(Default::default());
     }
-    let active_name = settings.active_profile().name;
-    let index = settings.profiles.iter().position(|profile| profile.name == active_name).unwrap_or(0);
+    let active_name = target.to_owned();
+    let index = settings
+        .profiles
+        .iter()
+        .position(|profile| profile.name == active_name)
+        .ok_or_else(|| bad(key, "no such profile"))?;
     let renamed_to = match (key, &value) {
         ("profile.name", FieldValue::Text(name)) => {
             let name = name.trim();
@@ -514,5 +549,35 @@ mod tests {
         }
         assert!(descriptor("window.width").is_some());
         assert!(descriptor("nope").is_none());
+    }
+
+    #[test]
+    fn given_two_profiles_when_writing_a_field_for_one_then_only_that_profile_changes() {
+        let mut settings = Settings::default();
+        settings.add_profile("wsl");
+        write_profile_field(&mut settings, "wsl", "profile.program", FieldValue::Text("wsl.exe".into()))
+            .expect("valid");
+        assert_eq!(read_profile_field(&settings, "wsl", "profile.program"), Some(FieldValue::Text("wsl.exe".into())));
+        assert_eq!(read_profile_field(&settings, "Default", "profile.program"), Some(FieldValue::Text(String::new())));
+    }
+
+    #[test]
+    fn given_bad_per_profile_writes_then_they_are_refused() {
+        let mut settings = Settings::default();
+        assert!(write_profile_field(&mut settings, "nobody", "profile.program", FieldValue::Text("x".into())).is_err());
+        assert!(write_profile_field(&mut settings, "Default", "window.width", FieldValue::Number(50)).is_err());
+        assert!(
+            write_profile_field(&mut settings, "Default", "profile.font_size_points", FieldValue::Number(500)).is_err()
+        );
+        assert_eq!(read_profile_field(&settings, "nobody", "profile.name"), None);
+    }
+
+    #[test]
+    fn given_a_renamed_non_default_profile_when_writing_its_name_then_the_default_pointer_is_untouched() {
+        let mut settings = Settings::default();
+        settings.add_profile("wsl");
+        write_profile_field(&mut settings, "wsl", "profile.name", FieldValue::Text("Ubuntu".into())).expect("valid");
+        assert!(settings.profile("Ubuntu").is_some() && settings.profile("wsl").is_none());
+        assert_eq!(settings.default_profile_name(), "Default");
     }
 }
