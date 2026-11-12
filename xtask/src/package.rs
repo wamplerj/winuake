@@ -66,11 +66,14 @@ impl Architecture {
 struct Options {
     architectures: Vec<Architecture>,
     version: String,
+    /// `OWNER/NAME` of the GitHub repository the release assets are published in (winget manifest URLs).
+    repository: Option<String>,
 }
 
 fn parse_options(arguments: &[String], default_version: &str) -> Result<Options, Box<dyn Error>> {
     let mut architectures = vec![Architecture::X64, Architecture::Arm64];
     let mut version = default_version.to_owned();
+    let mut repository = std::env::var("WINUAKE_REPOSITORY").ok();
     let mut iterator = arguments.iter();
     while let Some(argument) = iterator.next() {
         match argument.as_str() {
@@ -83,10 +86,16 @@ fn parse_options(arguments: &[String], default_version: &str) -> Result<Options,
                 }
             }
             "--version" => version = iterator.next().ok_or("--version needs a value")?.clone(),
+            "--repo" => repository = Some(iterator.next().ok_or("--repo needs OWNER/NAME")?.clone()),
             other => return Err(format!("unknown option {other}").into()),
         }
     }
-    Ok(Options { architectures, version })
+    if let Some(repository) = &repository
+        && repository.split('/').filter(|part| !part.is_empty()).count() != 2
+    {
+        return Err(format!("--repo must look like OWNER/NAME, not {repository}").into());
+    }
+    Ok(Options { architectures, version, repository })
 }
 
 pub fn run(workspace_root: &Path, arguments: &[String]) -> Result<(), Box<dyn Error>> {
@@ -111,9 +120,17 @@ pub fn run(workspace_root: &Path, arguments: &[String]) -> Result<(), Box<dyn Er
         build_release(workspace_root, architecture)?;
         let stage = stage_files(workspace_root, &distribution, architecture, &options.version)?;
         check_binaries(&stage, architecture)?;
+        if sign_binaries(signing.as_ref(), &[stage.join("winuake.exe"), stage.join("winuake-cli.exe")])? {
+            eprintln!("   signed executables");
+        }
         artifacts.push(make_zip(&distribution, &stage, architecture, &options.version)?);
         match make_installer(workspace_root, &distribution, &stage, &runtime, architecture, &options.version) {
-            Ok(path) => artifacts.push(path),
+            Ok(path) => {
+                if sign_binaries(signing.as_ref(), std::slice::from_ref(&path))? {
+                    eprintln!("   signed installer");
+                }
+                artifacts.push(path);
+            }
             Err(error) => eprintln!("warning: no installer for {}: {error}", architecture.label()),
         }
         match signing.as_ref().ok_or_else(|| "no signing certificate".into()).and_then(|signing| {
@@ -124,7 +141,7 @@ pub fn run(workspace_root: &Path, arguments: &[String]) -> Result<(), Box<dyn Er
         }
     }
     write_checksums(&distribution, &artifacts)?;
-    write_winget_manifest(&distribution, &artifacts, &options.version)?;
+    write_winget_manifest(&distribution, &artifacts, &options.version, options.repository.as_deref())?;
     eprintln!("done: {}", distribution.display());
     for artifact in &artifacts {
         eprintln!("  {}", artifact.display());
@@ -447,6 +464,10 @@ fn powershell(script: &str) -> Result<String, Box<dyn Error>> {
 struct Signing {
     pfx: PathBuf,
     password: String,
+    /// A self-signed development certificate: fine for the MSIX test install, but binaries are not signed with it.
+    throwaway: bool,
+    /// RFC 3161 timestamp server, so signatures outlive the certificate.
+    timestamp_url: Option<String>,
 }
 
 /// With `WINUAKE_SIGN_PFX` (and `WINUAKE_SIGN_PASSWORD`) signs with that certificate, whose subject must equal the manifest publisher.
@@ -454,9 +475,13 @@ struct Signing {
 /// be trusted for local testing only).
 fn prepare_signing(distribution: &Path) -> Result<Signing, Box<dyn Error>> {
     if let Ok(pfx) = std::env::var("WINUAKE_SIGN_PFX") {
+        let timestamp_url =
+            Some(std::env::var("WINUAKE_TIMESTAMP_URL").unwrap_or_else(|_| "http://timestamp.digicert.com".to_owned()));
         return Ok(Signing {
             pfx: PathBuf::from(pfx),
             password: std::env::var("WINUAKE_SIGN_PASSWORD").unwrap_or_default(),
+            throwaway: false,
+            timestamp_url,
         });
     }
     let pfx = distribution.join("winuake-dev.pfx");
@@ -470,7 +495,31 @@ fn prepare_signing(distribution: &Path) -> Result<Signing, Box<dyn Error>> {
         cer.display()
     );
     powershell(&script)?;
-    Ok(Signing { pfx, password: "winuake-dev".to_owned() })
+    Ok(Signing { pfx, password: "winuake-dev".to_owned(), throwaway: true, timestamp_url: None })
+}
+
+/// Signs one file with `signtool`.
+fn sign_file(signtool: &Path, signing: &Signing, file: &Path) -> Result<(), Box<dyn Error>> {
+    let mut command = Command::new(signtool);
+    command.args(["sign", "/fd", "SHA256", "/f"]).arg(&signing.pfx).args(["/p", &signing.password]);
+    if let Some(url) = &signing.timestamp_url {
+        command.args(["/tr", url, "/td", "SHA256"]);
+    }
+    let status = command.arg(file).status()?;
+    if !status.success() {
+        return Err(format!("signtool failed for {}", file.display()).into());
+    }
+    Ok(())
+}
+
+/// Signs the executables and, later, the installer, when a real certificate was given. Returns whether it signed.
+fn sign_binaries(signing: Option<&Signing>, files: &[PathBuf]) -> Result<bool, Box<dyn Error>> {
+    let Some(signing) = signing.filter(|signing| !signing.throwaway) else { return Ok(false) };
+    let signtool = windows_kit_tool("signtool.exe").ok_or("signtool.exe (Windows SDK) not found")?;
+    for file in files {
+        sign_file(&signtool, signing, file)?;
+    }
+    Ok(true)
 }
 
 /// Builds and signs an MSIX. With `WINUAKE_SIGN_PFX` (and `WINUAKE_SIGN_PASSWORD`) it signs with that certificate, whose subject must equal
@@ -493,7 +542,7 @@ fn make_msix(
     copy_directory(stage, &layout)?;
     let assets = layout.join("Assets");
     fs::create_dir_all(&assets)?;
-    let svg = fs::read(workspace_root.join("assets").join("skins").join("default").join("icon.svg"))?;
+    let svg = fs::read(workspace_root.join("assets").join("icon").join("winuake.svg"))?;
     for (name, pixels) in [("Square44x44Logo.png", 44), ("Square150x150Logo.png", 150), ("StoreLogo.png", 50)] {
         fs::write(assets.join(name), winuake_skin::raster::svg_to_square_png(&svg, pixels)?)?;
     }
@@ -504,15 +553,7 @@ fn make_msix(
         return Err("makeappx failed".into());
     }
 
-    let status = Command::new(&signtool)
-        .args(["sign", "/fd", "SHA256", "/a", "/f"])
-        .arg(&signing.pfx)
-        .args(["/p", &signing.password])
-        .arg(&package)
-        .status()?;
-    if !status.success() {
-        return Err("signtool failed".into());
-    }
+    sign_file(&signtool, signing, &package)?;
     Ok(package)
 }
 
@@ -533,9 +574,18 @@ fn write_checksums(distribution: &Path, artifacts: &[PathBuf]) -> Result<(), Box
 
 /// winget manifests (singleton-free multi-file form) for the two installers. The URLs assume GitHub release assets under
 /// `WINUAKE_RELEASE_BASE_URL`; fill in the real repository before submitting to winget-pkgs.
-fn write_winget_manifest(distribution: &Path, artifacts: &[PathBuf], version: &str) -> Result<(), Box<dyn Error>> {
+fn write_winget_manifest(
+    distribution: &Path,
+    artifacts: &[PathBuf],
+    version: &str,
+    repository: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    let repository = repository.unwrap_or("OWNER/winuake");
+    if repository.starts_with("OWNER/") {
+        eprintln!("warning: winget manifest uses the placeholder repository {repository}; pass --repo OWNER/NAME");
+    }
     let base = std::env::var("WINUAKE_RELEASE_BASE_URL")
-        .unwrap_or_else(|_| format!("https://github.com/OWNER/winuake/releases/download/v{version}"));
+        .unwrap_or_else(|_| format!("https://github.com/{repository}/releases/download/v{version}"));
     let directory = distribution.join("winget");
     fs::create_dir_all(&directory)?;
     let mut installers = String::new();
@@ -567,7 +617,7 @@ fn write_winget_manifest(distribution: &Path, artifacts: &[PathBuf], version: &s
     fs::write(
         directory.join("Winuake.Winuake.locale.en-US.yaml"),
         format!(
-            "PackageIdentifier: Winuake.Winuake\nPackageVersion: {version}\nPackageLocale: en-US\nPublisher: {PUBLISHER}\nPackageName: {PRODUCT}\nShortDescription: Drop-down terminal for Windows 11, a port of KDE Yakuake.\nLicense: GPL-2.0-or-later\nLicenseUrl: https://github.com/OWNER/winuake/blob/main/LICENSE\nPublisherUrl: https://github.com/OWNER/winuake\nTags:\n- terminal\n- dropdown\n- quake\n- yakuake\nManifestType: defaultLocale\nManifestVersion: 1.6.0\n"
+            "PackageIdentifier: Winuake.Winuake\nPackageVersion: {version}\nPackageLocale: en-US\nPublisher: {PUBLISHER}\nPackageName: {PRODUCT}\nShortDescription: Drop-down terminal for Windows 11, a port of KDE Yakuake.\nLicense: GPL-2.0-or-later\nLicenseUrl: https://github.com/{repository}/blob/main/LICENSE\nPublisherUrl: https://github.com/{repository}\nTags:\n- terminal\n- dropdown\n- quake\n- yakuake\nManifestType: defaultLocale\nManifestVersion: 1.6.0\n"
         ),
     )?;
     Ok(())
@@ -592,6 +642,16 @@ mod tests {
         assert_eq!(options.architectures.len(), 1);
         assert_eq!(options.architectures[0].label(), "arm64");
         assert_eq!(options.version, "9.9.9");
+    }
+
+    #[test]
+    fn given_a_repository_when_parsing_then_it_must_look_like_owner_slash_name() {
+        let good: Vec<String> = ["--repo", "someone/winuake"].iter().map(|text| (*text).to_owned()).collect();
+        assert_eq!(parse_options(&good, "1.0.0").expect("parses").repository.as_deref(), Some("someone/winuake"));
+        for bad in ["winuake", "a/b/c", "/"] {
+            let arguments = vec!["--repo".to_owned(), bad.to_owned()];
+            assert!(parse_options(&arguments, "1.0.0").is_err(), "{bad}");
+        }
     }
 
     #[test]

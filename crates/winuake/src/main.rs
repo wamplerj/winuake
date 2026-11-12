@@ -81,9 +81,17 @@ fn main() -> windows_core::Result<()> {
     // Without this Windows treats the app as DPI-unaware: coordinates are virtualized to 100% and the whole window is bitmap-scaled.
     // It must happen before any window exists.
     if unsafe { SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2) } == 0 {
-        eprintln!("could not enable per-monitor DPI awareness: {}", windows_core::Error::from_thread());
+        let error = windows_core::Error::from_thread();
+        // The application manifest already sets this, so "access denied" (already set) is the normal outcome.
+        if error.code() != windows_core::HRESULT(0x8007_0005_u32 as i32) {
+            eprintln!("could not enable per-monitor DPI awareness: {error}");
+        }
     }
     diagnostics::initialize();
+    // Diagnostic hook: proves the crash report path end to end (`WINUAKE_TEST_PANIC=1 winuake.exe`).
+    if std::env::var_os("WINUAKE_TEST_PANIC").is_some() {
+        panic!("test panic requested by WINUAKE_TEST_PANIC");
+    }
     if single_instance::claim() == single_instance::InstanceRole::AlreadyRunning {
         single_instance::request_toggle();
         return Ok(());

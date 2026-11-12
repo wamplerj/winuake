@@ -1,4 +1,4 @@
-//! `cargo xtask gen-icon`: renders the app icon (the default skin's `icon.svg`, a placeholder until Winuake has its own art) at the sizes
+//! `cargo xtask gen-icon`: renders the app icon (`assets/icon/winuake.svg`) at the sizes
 //! Windows asks for and writes `assets/icon/winuake.ico` (PNG-compressed entries).
 
 use std::error::Error;
@@ -8,7 +8,7 @@ use winuake_skin::raster::svg_to_square_png;
 const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
 
 pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
-    let source = workspace_root.join("assets").join("skins").join("default").join("icon.svg");
+    let source = workspace_root.join("assets").join("icon").join("winuake.svg");
     let svg = std::fs::read(&source)?;
     let mut images = Vec::new();
     for size in SIZES {

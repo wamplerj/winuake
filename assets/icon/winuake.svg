@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <title>Winuake</title>
+  <!-- Terminal window with a bar at the top and a tab hanging below: the drop-down terminal. -->
+  <rect x="16" y="16" width="224" height="200" rx="32" fill="#1b1d23"/>
+  <path d="M16 48a32 32 0 0 1 32-32h160a32 32 0 0 1 32 32v24H16z" fill="#3b82f6"/>
+  <circle cx="48" cy="44" r="9" fill="#dbeafe"/>
+  <circle cx="76" cy="44" r="9" fill="#dbeafe" fill-opacity=".7"/>
+  <circle cx="104" cy="44" r="9" fill="#dbeafe" fill-opacity=".45"/>
+  <path d="M60 112l52 38-52 38" fill="none" stroke="#e6e9ef" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="128" y="172" width="72" height="18" rx="9" fill="#e6e9ef"/>
+  <path d="M88 216h80l-40 28z" fill="#3b82f6"/>
+</svg>

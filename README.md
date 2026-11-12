@@ -39,4 +39,4 @@ The app (`crates/winuake`) runs on Windows 11 only; the logic crates build and t
 
 ## License
 
-GPL-2.0-or-later, same as Yakuake. Bundled skins come from Yakuake (see `assets/skins/NOTICE.md`); the app icon is the Yakuake default skin icon until Winuake has its own.
+GPL-2.0-or-later, same as Yakuake. Bundled skins come from Yakuake (see `assets/skins/NOTICE.md`).
