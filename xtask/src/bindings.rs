@@ -198,6 +198,20 @@ const RENDER_FILTERS: &[&str] = &[
 
 /// Win32 window management used by the drop-down host in `winuake`.
 const WINDOW_FILTERS: &[&str] = &[
+    "RegCreateKeyExW",
+    "RegSetValueExW",
+    "RegDeleteValueW",
+    "RegGetValueW",
+    "RegCloseKey",
+    "HKEY",
+    "HKEY_CURRENT_USER",
+    "KEY_SET_VALUE",
+    "KEY_QUERY_VALUE",
+    "REG_SZ",
+    "REG_OPTION_NON_VOLATILE",
+    "RRF_RT_REG_SZ",
+    "ERROR_SUCCESS",
+    "ERROR_FILE_NOT_FOUND",
     "CreateNamedPipeW",
     "ConnectNamedPipe",
     "DisconnectNamedPipe",

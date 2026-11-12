@@ -200,4 +200,5 @@ fn apply(settings: &Settings) {
     crate::drop_down::apply_settings(settings);
     crate::workspace_host::apply_settings(settings);
     crate::tray::set_icon_visible(settings.window.show_tray_icon);
+    crate::autostart::apply(settings.window.start_with_windows);
 }

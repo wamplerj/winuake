@@ -9,6 +9,8 @@ mod bindings {
     include!("bindings_extensions.rs");
 }
 #[cfg(windows)]
+mod autostart;
+#[cfg(windows)]
 mod bootstrap;
 #[cfg(windows)]
 mod chrome;
@@ -17,6 +19,8 @@ mod clipboard;
 #[cfg(windows)]
 #[allow(warnings, clippy::all)]
 mod composition;
+#[cfg(windows)]
+mod diagnostics;
 #[cfg(windows)]
 mod drop_down;
 #[cfg(windows)]
@@ -79,12 +83,7 @@ fn main() -> windows_core::Result<()> {
     if unsafe { SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2) } == 0 {
         eprintln!("could not enable per-monitor DPI awareness: {}", windows_core::Error::from_thread());
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "winuake=info,winuake_term=info".into()),
-        )
-        .init();
+    diagnostics::initialize();
     if single_instance::claim() == single_instance::InstanceRole::AlreadyRunning {
         single_instance::request_toggle();
         return Ok(());
@@ -95,6 +94,7 @@ fn main() -> windows_core::Result<()> {
     // Shutting the Windows App SDK runtime down while XAML's threads are still alive hangs process exit (one thread waits forever and the
     // dead process keeps its memory, handles and single-instance lock). Everything we own is already cleaned up, so leave directly.
     std::mem::forget(runtime);
+    diagnostics::shutdown();
     terminate_process_now(u32::from(outcome.is_err()))
 }
 

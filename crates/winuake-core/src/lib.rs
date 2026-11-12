@@ -2,6 +2,7 @@
 //! Ports Yakuake `sessionstack`, `session`, `splitter` and the window logic of `mainwindow`.
 
 pub mod actions;
+pub mod diagnostics;
 pub mod drop_down;
 pub mod ids;
 pub mod notifications;

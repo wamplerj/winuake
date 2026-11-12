@@ -1,6 +1,7 @@
 //! Dev tasks: `cargo xtask <task>`.
 
 mod bindings;
+mod icon;
 mod winappsdk;
 
 use std::path::PathBuf;
@@ -16,9 +17,10 @@ fn main() -> ExitCode {
                 println!("{}", directory.join("tools").join("MSIX").join("win10-x64").display());
             })
         }
+        Some("gen-icon") => icon::generate(&workspace_root),
         Some("upstream-diff") => Err("upstream-diff: not implemented yet".into()),
         _ => {
-            eprintln!("usage: cargo xtask <gen-bindings|fetch-runtime|upstream-diff>");
+            eprintln!("usage: cargo xtask <gen-bindings|gen-icon|fetch-runtime|upstream-diff>");
             return ExitCode::from(2);
         }
     };

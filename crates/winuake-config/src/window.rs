@@ -41,6 +41,8 @@ pub struct WindowSettings {
     pub dynamic_tab_titles: bool,
     /// `Behavior/FocusFollowsMouse`.
     pub focus_follows_mouse: bool,
+    /// Winuake addition: start when the user signs in to Windows.
+    pub start_with_windows: bool,
 }
 
 impl Default for WindowSettings {
@@ -63,6 +65,7 @@ impl Default for WindowSettings {
             show_tab_bar: true,
             dynamic_tab_titles: false,
             focus_follows_mouse: false,
+            start_with_windows: false,
         }
     }
 }
@@ -103,6 +106,7 @@ impl WindowSettings {
                 "keep_open_after_last_session_closes" => {
                     value.parse().map(|parsed| self.keep_open_after_last_session_closes = parsed).is_ok()
                 }
+                "start_with_windows" => value.parse().map(|parsed| self.start_with_windows = parsed).is_ok(),
                 "open_after_start" => value.parse().map(|parsed| self.open_after_start = parsed).is_ok(),
                 _ => {
                     problems.push(format!("unknown setting `{key}`"));

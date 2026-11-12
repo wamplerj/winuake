@@ -175,6 +175,7 @@ struct WindowGroup {
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 struct BehaviorGroup {
+    start_with_windows: bool,
     focus_follows_mouse: bool,
     open_after_start: bool,
     remember_fullscreen: bool,
@@ -227,6 +228,7 @@ impl From<&WindowSettings> for WindowGroup {
 impl From<&WindowSettings> for BehaviorGroup {
     fn from(window: &WindowSettings) -> Self {
         Self {
+            start_with_windows: window.start_with_windows,
             focus_follows_mouse: window.focus_follows_mouse,
             open_after_start: window.open_after_start,
             remember_fullscreen: window.remember_fullscreen,
@@ -291,6 +293,7 @@ impl Settings {
             show_tab_bar: window_group.show_tab_bar,
             dynamic_tab_titles: window_group.dynamic_tab_titles,
             focus_follows_mouse: behavior.focus_follows_mouse,
+            start_with_windows: behavior.start_with_windows,
         };
         let clamped_window = window.clone().clamped();
         if clamped_window != window {
@@ -457,6 +460,7 @@ mod tests {
         settings.window.keep_open = false;
         settings.window.dynamic_tab_titles = true;
         settings.window.focus_follows_mouse = true;
+        settings.window.start_with_windows = true;
         settings.window.frames = 0;
         settings.appearance.translucency = true;
         settings.appearance.background_color = "#112233".to_owned();

@@ -125,6 +125,7 @@ fn open_main_window() -> Result<()> {
         crate::script_server::start(dispatcher);
     }
     crate::drop_down::apply_settings(&settings);
+    crate::autostart::apply(settings.window.start_with_windows);
 
     // Show once, off screen, so XAML lays the terminal out at its real size; then hide until the first toggle.
     host.park_for_first_layout();
