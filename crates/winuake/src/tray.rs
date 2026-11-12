@@ -167,7 +167,7 @@ fn show_menu(window: HWND) {
 
         match chosen {
             MENU_TOGGLE => crate::drop_down::toggle(),
-            MENU_SETTINGS => crate::settings_window::open(None),
+            MENU_SETTINGS => crate::workspace_host::open_settings(crate::settings_window::WINDOW_PAGE),
             MENU_QUIT => crate::workspace_host::request_quit(),
             _ => {}
         }

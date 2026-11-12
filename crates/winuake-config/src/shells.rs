@@ -83,7 +83,7 @@ pub fn detect_shells(environment: &dyn ShellEnvironment) -> Vec<Profile> {
 
 /// Reads the output of `wsl.exe --list --quiet`: UTF-16, one distribution per line. Docker's helper distributions are ignored.
 pub fn parse_wsl_list(output: &[u8]) -> Vec<String> {
-    let units: Vec<u16> = output.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
+    let units: Vec<u16> = output.as_chunks::<2>().0.iter().map(|pair| u16::from_le_bytes(*pair)).collect();
     let text = String::from_utf16_lossy(&units);
     text.lines()
         .map(|line| {

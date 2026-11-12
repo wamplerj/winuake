@@ -218,7 +218,12 @@ impl Chrome {
                     SkinButtonViews::connect(&title_element, "Focus", || workspace_host::run_action(Action::KeepOpen))?;
                 SkinButtonViews::connect(&title_element, "Config", show_main_menu)?;
                 SkinButtonViews::connect(&title_element, "Quit", workspace_host::request_quit)?;
-                SkinButtonViews::connect(&tab_element, "Plus", || workspace_host::run_action(Action::NewSession))?;
+                SkinButtonViews::connect_with_right_click(
+                    &tab_element,
+                    "Plus",
+                    || workspace_host::run_action(Action::NewSession),
+                    Some(Box::new(show_profile_menu)),
+                )?;
                 SkinButtonViews::connect(&tab_element, "Minus", workspace_host::close_selected_session)?;
             }
             None => {
@@ -232,12 +237,26 @@ impl Chrome {
                 ))?
                 .cast()?;
                 press(&new_tab.cast()?, || workspace_host::run_action(Action::NewSession))?;
+                let plain_plus: UIElement = new_tab.cast()?;
+                let plain_target = plain_plus.clone();
+                std::mem::forget(plain_plus.PointerPressed(move |_, args| {
+                    if let Some(args) = args.as_ref()
+                        && skin_chrome::is_right_button(args, &plain_target)
+                    {
+                        show_profile_menu();
+                    }
+                })?);
                 tabs.plain_new_tab = Some(new_tab);
             }
         }
         if let Some(skin) = skin.as_ref().filter(|skin| skin.skin.tab_bar.plus_button_at_end_of_tabs) {
             let inline = load(&skin_chrome::plus_button_inline_markup(skin))?;
-            SkinButtonViews::connect(&inline, "Plus", || workspace_host::run_action(Action::NewSession))?;
+            SkinButtonViews::connect_with_right_click(
+                &inline,
+                "Plus",
+                || workspace_host::run_action(Action::NewSession),
+                Some(Box::new(show_profile_menu)),
+            )?;
             tabs.inline_plus = Some(inline.cast()?);
         }
         crate::title_drag::connect(&title_element.cast()?)?;
@@ -625,6 +644,42 @@ const MAIN_MENU_QUIT: usize = 3;
 const MAIN_MENU_SETTINGS: usize = 4;
 const MAIN_MENU_SHORTCUTS: usize = 5;
 
+const PROFILE_MENU_BASE: usize = 1000;
+
+/// Appends "New Session with Profile" with one entry per profile (the default is checked).
+fn append_profile_submenu(menu: HMENU) {
+    use crate::window_bindings::{CreatePopupMenu, MF_POPUP};
+    let choices = workspace_host::profile_choices();
+    unsafe {
+        let submenu = CreatePopupMenu();
+        for (index, choice) in choices.iter().enumerate() {
+            let label = HSTRING::from(choice.name.as_str());
+            let _ = AppendMenuW(submenu, flags(true, choice.is_default), PROFILE_MENU_BASE + index, &label);
+        }
+        let _ = AppendMenuW(menu, MF_POPUP as u32, submenu.0 as usize, w!("New Session with Profile"));
+    }
+}
+
+fn start_profile_session(index: usize) {
+    if let Some(choice) = workspace_host::profile_choices().get(index) {
+        workspace_host::add_session_with_profile(&choice.name);
+    }
+}
+
+/// Right-click on the plus button: a menu of profiles, choosing one starts a session with it.
+fn show_profile_menu() {
+    let choices = workspace_host::profile_choices();
+    let chosen = track_menu(|menu| unsafe {
+        for (index, choice) in choices.iter().enumerate() {
+            let label = HSTRING::from(choice.name.as_str());
+            let _ = AppendMenuW(menu, flags(true, choice.is_default), PROFILE_MENU_BASE + index, &label);
+        }
+    });
+    if chosen >= PROFILE_MENU_BASE {
+        start_profile_session(chosen - PROFILE_MENU_BASE);
+    }
+}
+
 /// The title bar's menu button. Yakuake's full menu (settings, skins, help) arrives with the settings window.
 fn show_main_menu() {
     let chosen = track_menu(|menu| unsafe {
@@ -636,6 +691,8 @@ fn show_main_menu() {
         );
         let _ = AppendMenuW(menu, flags(true, false), MAIN_MENU_TITLEBAR, w!("Toggle Titlebar"));
         let _ = AppendMenuW(menu, MF_SEPARATOR as u32, 0, PCWSTR::null());
+        append_profile_submenu(menu);
+        let _ = AppendMenuW(menu, MF_SEPARATOR as u32, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, flags(true, false), MAIN_MENU_SETTINGS, w!("Settings..."));
         let _ = AppendMenuW(menu, flags(true, false), MAIN_MENU_SHORTCUTS, w!("Configure Shortcuts..."));
         let _ = AppendMenuW(menu, MF_SEPARATOR as u32, 0, PCWSTR::null());
@@ -644,8 +701,9 @@ fn show_main_menu() {
     match chosen {
         MAIN_MENU_KEEP_OPEN => workspace_host::run_action(Action::KeepOpen),
         MAIN_MENU_TITLEBAR => workspace_host::run_action(Action::ToggleTitlebar),
-        MAIN_MENU_SETTINGS => crate::settings_window::open(None),
-        MAIN_MENU_SHORTCUTS => crate::settings_window::open_shortcuts(),
+        MAIN_MENU_SETTINGS => workspace_host::open_settings(crate::settings_window::WINDOW_PAGE),
+        MAIN_MENU_SHORTCUTS => workspace_host::open_settings(crate::settings_window::SHORTCUTS_PAGE),
+        id if id >= PROFILE_MENU_BASE => start_profile_session(id - PROFILE_MENU_BASE),
         MAIN_MENU_QUIT => workspace_host::request_quit(),
         _ => {}
     }

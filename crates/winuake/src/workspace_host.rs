@@ -72,7 +72,13 @@ pub struct WorkspaceHost {
     window_handle: isize,
     content: ContentControl,
     sessions: RefCell<HashMap<SessionId, SessionView>>,
-    profile: RefCell<Profile>,
+    profiles: RefCell<Vec<Profile>>,
+    default_profile: RefCell<String>,
+    /// Which profile each terminal was started with, so splits keep it.
+    terminal_profiles: RefCell<HashMap<TerminalId, String>>,
+    /// Profile requested for the session being created ("new session with profile").
+    pending_profile: RefCell<Option<String>>,
+    settings_session: Cell<Option<SessionId>>,
     background: RefCell<winuake_render::gpu::BackgroundStyle>,
     schemes: RefCell<Vec<NamedScheme>>,
     chrome: Chrome,
@@ -89,7 +95,11 @@ impl WorkspaceHost {
             window_handle,
             content,
             sessions: RefCell::new(HashMap::new()),
-            profile: RefCell::new(settings.active_profile()),
+            profiles: RefCell::new(settings.profiles.clone()),
+            default_profile: RefCell::new(settings.default_profile_name()),
+            terminal_profiles: RefCell::new(HashMap::new()),
+            pending_profile: RefCell::new(None),
+            settings_session: Cell::new(None),
             background: RefCell::new(background_style(settings)),
             schemes: RefCell::new(load_schemes()),
             chrome,
@@ -159,12 +169,20 @@ impl WorkspaceHost {
                 grid.SetVerticalAlignment(VerticalAlignment::Stretch)?;
                 self.sessions.borrow_mut().insert(*session, SessionView { grid, dividers: RefCell::new(Vec::new()) });
                 for terminal in terminals {
-                    self.start_terminal(*session, *terminal)?;
+                    self.start_terminal(*session, *terminal, None)?;
                 }
+                self.pending_profile.borrow_mut().take();
             }
-            WorkspaceEffect::TerminalAdded { session, terminal, .. } => {
+            WorkspaceEffect::PageOpened { session } => {
+                let page = crate::settings_window::build_page()?;
+                if let Some(session_view) = self.sessions.borrow().get(session) {
+                    session_view.grid.Children()?.Append(&page.cast::<UIElement>()?)?;
+                }
+                self.settings_session.set(Some(*session));
+            }
+            WorkspaceEffect::TerminalAdded { session, terminal, working_directory_from } => {
                 tracing::info!(session_id = %session, terminal_id = %terminal, "terminal added");
-                self.start_terminal(*session, *terminal)?;
+                self.start_terminal(*session, *terminal, Some(*working_directory_from))?;
                 self.relayout(*session);
             }
             WorkspaceEffect::TerminalRemoved { session, terminal } => {
@@ -175,10 +193,15 @@ impl WorkspaceHost {
                     remove_child(&session_view.grid, view.element())?;
                 }
                 terminal_view::discard(*terminal);
+                self.terminal_profiles.borrow_mut().remove(terminal);
             }
             WorkspaceEffect::SessionRemoved { session } => {
                 tracing::info!(session_id = %session, "session removed");
                 self.sessions.borrow_mut().remove(session);
+                if self.settings_session.get() == Some(*session) {
+                    self.settings_session.set(None);
+                    crate::settings_window::closed();
+                }
             }
             WorkspaceEffect::SessionRaised { session } => {
                 if let Some(session_view) = self.sessions.borrow().get(session) {
@@ -199,10 +222,22 @@ impl WorkspaceHost {
         Ok(())
     }
 
-    fn start_terminal(&self, session: SessionId, terminal: TerminalId) -> Result<()> {
-        let profile = self.profile.borrow().clone();
+    /// The profile for a new terminal: the one its split source uses, else the one requested for the new session, else the default.
+    fn profile_for_new_terminal(&self, source: Option<TerminalId>) -> Profile {
+        let requested = match source {
+            Some(source) => self.terminal_profiles.borrow().get(&source).cloned(),
+            None => self.pending_profile.borrow().clone(),
+        };
+        let name = requested.unwrap_or_else(|| self.default_profile.borrow().clone());
+        let profiles = self.profiles.borrow();
+        profiles.iter().find(|profile| profile.name == name).or_else(|| profiles.first()).cloned().unwrap_or_default()
+    }
+
+    fn start_terminal(&self, session: SessionId, terminal: TerminalId, source: Option<TerminalId>) -> Result<()> {
+        let profile = self.profile_for_new_terminal(source);
         let started = start_shell(terminal, &profile)?;
-        let title = started.title;
+        self.terminal_profiles.borrow_mut().insert(terminal, profile.name.clone());
+        let title = profile.name.clone();
         let font = FontSpec { family: profile.font_family.clone(), size_points: profile.font_size_points };
         let scheme = self.scheme_for(&profile);
         let view = TerminalView::create(started.session, &font, scheme, profile.cursor_blink, self.window_handle)?;
@@ -363,9 +398,7 @@ impl WorkspaceHost {
             Action::Quit => request_quit(),
             Action::ToggleWindowState => crate::drop_down::toggle(),
             Action::KeepOpen => self.chrome.toggle_keep_open(),
-            Action::ManageProfiles | Action::EditProfile => {
-                crate::settings_window::open(Some(winuake_config::fields::Page::Profile));
-            }
+            Action::ManageProfiles | Action::EditProfile => open_settings(crate::settings_window::PROFILE_PAGE),
             Action::IncreaseWindowWidth => {
                 crate::drop_down::dispatch(DropDownEvent::AdjustWidth(PercentStep::Increase))
             }
@@ -526,7 +559,8 @@ pub fn apply_settings(settings: &Settings) {
     let effects = host.workspace.borrow_mut().apply_settings(workspace_settings(settings));
     host.apply(effects);
     *host.shortcuts.borrow_mut() = shortcut_map(settings);
-    *host.profile.borrow_mut() = settings.active_profile();
+    *host.profiles.borrow_mut() = settings.profiles.clone();
+    *host.default_profile.borrow_mut() = settings.default_profile_name();
     *host.schemes.borrow_mut() = load_schemes();
     host.chrome.apply_appearance(settings, &host);
     host.chrome.apply_bar_visibility(&settings.window);
@@ -540,6 +574,40 @@ pub fn apply_settings(settings: &Settings) {
             }
         }
     }
+}
+
+/// Opens the settings as a tab (raising it if it is already open), showing the window first when it is hidden.
+pub fn open_settings(page: &str) {
+    let Some(host) = host() else { return };
+    if !crate::drop_down::is_open() {
+        crate::drop_down::toggle();
+    }
+    host.perform(Workspace::open_settings_page);
+    crate::settings_window::show_page(page);
+}
+
+/// A profile new sessions can use, for the "new session with profile" menus.
+pub struct ProfileChoice {
+    pub name: String,
+    pub is_default: bool,
+}
+
+pub fn profile_choices() -> Vec<ProfileChoice> {
+    let Some(host) = host() else { return Vec::new() };
+    let default = host.default_profile.borrow().clone();
+    host.profiles
+        .borrow()
+        .iter()
+        .map(|profile| ProfileChoice { name: profile.name.clone(), is_default: profile.name == default })
+        .collect()
+}
+
+/// A new single-terminal session using the named profile.
+pub fn add_session_with_profile(name: &str) {
+    let Some(host) = host() else { return };
+    *host.pending_profile.borrow_mut() = Some(name.to_owned());
+    host.add_session(SessionKind::Single);
+    host.pending_profile.borrow_mut().take();
 }
 
 pub fn run_action(action: Action) {
@@ -970,8 +1038,6 @@ fn pointer_position(args: &PointerRoutedEventArgs, relative_to: &Grid) -> Option
 
 struct StartedShell {
     session: TerminalSession,
-    /// Shell program name, used as the terminal's title until the shell sets its own.
-    title: String,
 }
 
 fn start_shell(id: TerminalId, profile: &Profile) -> Result<StartedShell> {
@@ -983,8 +1049,6 @@ fn start_shell(id: TerminalId, profile: &Profile) -> Result<StartedShell> {
         Some(program) => (program.clone(), profile.arguments.clone()),
         None => (default_shell.program, default_shell.arguments),
     };
-    let title =
-        std::path::Path::new(&program).file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
     let working_directory = profile
         .working_directory
         .as_ref()
@@ -1009,7 +1073,7 @@ fn start_shell(id: TerminalId, profile: &Profile) -> Result<StartedShell> {
         tracing::error!(terminal_id = %id, %error, "could not start the shell");
         windows_core::Error::new(windows_core::HRESULT(0x8000_4005_u32 as i32), error.to_string())
     })?;
-    Ok(StartedShell { session, title })
+    Ok(StartedShell { session })
 }
 
 /// Built-in color schemes plus any `.json` (Windows Terminal) or `.colorscheme` (Konsole) files in `%APPDATA%\Winuake\schemes`.

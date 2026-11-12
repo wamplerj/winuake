@@ -1,15 +1,14 @@
-//! The settings window: Window / Behavior / Appearance / Shortcuts / Profile pages, built from `winuake_config::fields` and the action
+//! The settings page, shown in a tab of the Winuake window: Window / Behavior / Appearance / Skins / Shortcuts / Profile pages, built from `winuake_config::fields` and the action
 //! table. Every edit is checked, saved and applied at once through `settings_store`; there is no Apply button.
 //!
 //! The window is XAML markup with named controls. Text boxes commit when they lose focus; check boxes commit when clicked; shortcut
 //! boxes record the key combination pressed in them.
 
 use crate::bindings::{
-    Button, FrameworkElement, Panel, TextBlock, TextBox, ToggleButton, UIElement, Visibility, Window, XamlReader,
+    Button, FrameworkElement, Panel, TextBlock, TextBox, ToggleButton, UIElement, Visibility, XamlReader,
 };
 use crate::settings_store;
-use crate::window_bindings::{BringWindowToTop, HWND, HWND_TOPMOST, SWP_NOMOVE, SetForegroundWindow, SetWindowPos};
-use crate::window_native::IWindowNative;
+use crate::window_bindings::HWND;
 use std::cell::RefCell;
 use std::rc::Rc;
 use windows_core::{HSTRING, Interface, Result};
@@ -22,18 +21,19 @@ const XAML_NAMESPACE: &str = "http://schemas.microsoft.com/winfx/2006/xaml/prese
 const XAML_X_NAMESPACE: &str = "http://schemas.microsoft.com/winfx/2006/xaml";
 const TEXT: &str = "#FFDDDDDD";
 const DIM: &str = "#FF999999";
-const WINDOW_WIDTH: i32 = 1100;
-const WINDOW_HEIGHT: i32 = 900;
-const SHORTCUTS_PAGE: &str = "Shortcuts";
+pub const WINDOW_PAGE: &str = "Window";
+pub const SHORTCUTS_PAGE: &str = "Shortcuts";
+pub const PROFILE_PAGE: &str = "Profile";
 const SKINS_PAGE: &str = "Skins";
-const PAGES: [&str; 6] = ["Window", "Behavior", "Appearance", SKINS_PAGE, SHORTCUTS_PAGE, "Profile"];
+const PAGES: [&str; 6] = [WINDOW_PAGE, "Behavior", "Appearance", SKINS_PAGE, SHORTCUTS_PAGE, PROFILE_PAGE];
 
 thread_local! {
     static OPEN: RefCell<Option<Rc<SettingsWindow>>> = const { RefCell::new(None) };
+    /// The profile whose settings the Profile page shows.
+    static SELECTED_PROFILE: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 struct SettingsWindow {
-    window: Window,
     root: FrameworkElement,
 }
 
@@ -91,6 +91,11 @@ fn page_markup(page: Page, settings: &Settings) -> String {
     page_wrapper(page.title(), &rows)
 }
 
+fn profile_page_markup() -> String {
+    let rows = r##"<TextBlock Text="Profiles: shell, font, colors and more for each kind of terminal. Click one to edit it. New sessions use the default profile; right-click the + button (or use the menu) to pick another." Foreground="#FF999999" FontSize="12" TextWrapping="Wrap"/><StackPanel x:Name="ProfileList" Margin="0,10,0,0"/><StackPanel Orientation="Horizontal" Margin="0,12,0,0"><Button x:Name="AddProfileButton" Content="Add"/><Button x:Name="DuplicateProfileButton" Content="Duplicate" Margin="8,0,0,0"/><Button x:Name="DeleteProfileButton" Content="Delete" Margin="8,0,0,0"/><Button x:Name="DefaultProfileButton" Content="Make default" Margin="8,0,0,0"/><Button x:Name="DetectShellsButton" Content="Add detected shells" Margin="8,0,0,0"/></StackPanel><StackPanel x:Name="ProfileFields" Margin="0,8,0,0"/>"##;
+    page_wrapper(PROFILE_PAGE, rows)
+}
+
 fn skins_markup() -> String {
     let rows = r##"<StackPanel x:Name="SkinList"/><StackPanel Orientation="Horizontal" Margin="0,16,0,0"><Button x:Name="InstallSkinButton" Content="Install skin from file..." /><Button x:Name="RemoveSkinButton" Content="Remove selected skin" Margin="10,0,0,0"/></StackPanel><TextBlock Margin="0,12,0,0" Foreground="#FF999999" FontSize="12" TextWrapping="Wrap" Text="Skins are folders with title.skin and tabs.skin. Install a .zip, .tar or .tar.gz archive that holds one skin folder."/>"##;
     page_wrapper(SKINS_PAGE, rows)
@@ -131,7 +136,7 @@ fn window_markup(settings: &Settings) -> String {
     let pages: String = [Page::Window, Page::Behavior, Page::Appearance]
         .into_iter()
         .map(|page| page_markup(page, settings))
-        .chain([skins_markup(), shortcuts_markup(settings), page_markup(Page::Profile, settings)])
+        .chain([skins_markup(), shortcuts_markup(settings), profile_page_markup()])
         .collect();
     format!(
         r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Background="#FF202020">
@@ -146,78 +151,36 @@ fn window_markup(settings: &Settings) -> String {
     )
 }
 
-/// Opens the settings window (or brings the open one forward) on `page`.
-pub fn open(page: Option<Page>) {
-    let existing = OPEN.with(|slot| slot.borrow().clone());
-    let result = match existing {
-        Some(window) => window.show_page(page_name(page)).map(|()| window),
-        None => create(page_name(page)),
-    };
-    match result {
-        Ok(window) => {
-            window.bring_forward();
-            OPEN.with(|slot| *slot.borrow_mut() = Some(window));
-        }
-        Err(error) => tracing::error!(%error, "could not open the settings window"),
-    }
-}
-
-fn page_name(page: Option<Page>) -> &'static str {
-    page.map_or("Window", Page::title)
-}
-
-/// Opens the shortcut editor page.
-pub fn open_shortcuts() {
-    let existing = OPEN.with(|slot| slot.borrow().clone());
-    match existing {
-        Some(window) => {
-            let _ = window.show_page(SHORTCUTS_PAGE);
-            window.bring_forward();
-        }
-        None => match create(SHORTCUTS_PAGE) {
-            Ok(window) => {
-                window.bring_forward();
-                OPEN.with(|slot| *slot.borrow_mut() = Some(window));
-            }
-            Err(error) => tracing::error!(%error, "could not open the settings window"),
-        },
-    }
-}
-
-fn create(initial_page: &str) -> Result<Rc<SettingsWindow>> {
+/// Builds the settings UI for the settings tab. Call once per tab.
+pub fn build_page() -> Result<FrameworkElement> {
     let settings = settings_store::current();
     let root: FrameworkElement = XamlReader::Load(&HSTRING::from(window_markup(&settings)))
-        .inspect_err(|error| tracing::error!(%error, "settings window: markup failed"))?
+        .inspect_err(|error| tracing::error!(%error, "settings page: markup failed"))?
         .cast()?;
-    let window = Window::new()?;
-    window.SetTitle(&HSTRING::from("Winuake Settings"))?;
-    window.SetContent(&root)?;
-    let shown = Rc::new(SettingsWindow { window: window.clone(), root: root.clone() });
-    shown.connect(&settings).inspect_err(|error| tracing::error!(%error, "settings window: connect failed"))?;
+    let shown = Rc::new(SettingsWindow { root: root.clone() });
+    shown.connect(&settings).inspect_err(|error| tracing::error!(%error, "settings page: connect failed"))?;
     OPEN.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&shown)));
     refresh_skin_list();
-    shown.show_page(initial_page).inspect_err(|error| tracing::error!(%error, "settings window: show_page failed"))?;
-    std::mem::forget(window.Closed(move |_, _| {
-        OPEN.with(|slot| slot.borrow_mut().take());
-    })?);
-    window.Activate()?;
-    Ok(shown)
+    refresh_profile_page();
+    shown.show_page(WINDOW_PAGE)?;
+    Ok(root)
+}
+
+/// The settings tab was closed.
+pub fn closed() {
+    OPEN.with(|slot| slot.borrow_mut().take());
+}
+
+/// Switches the open settings page to `name` (one of the `*_PAGE` names or "Behavior" / "Appearance").
+pub fn show_page(name: &str) {
+    if let Some(window) = OPEN.with(|slot| slot.borrow().clone())
+        && let Err(error) = window.show_page(name)
+    {
+        tracing::warn!(%error, page = name, "could not switch settings page");
+    }
 }
 
 impl SettingsWindow {
-    fn bring_forward(&self) {
-        let Ok(native) = self.window.cast::<IWindowNative>() else { return };
-        let Ok(handle) = native.handle() else { return };
-        let hwnd = HWND(handle as *mut core::ffi::c_void);
-        unsafe {
-            // Above the topmost drop-down, and sized once.
-            let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, SWP_NOMOVE as u32);
-            let _ = BringWindowToTop(hwnd);
-            let _ = SetForegroundWindow(hwnd);
-        }
-        let _ = self.window.Activate();
-    }
-
     fn show_page(&self, name: &str) -> Result<()> {
         for title in PAGES {
             let page: UIElement = find(&self.root, &format!("Page_{title}"))?;
@@ -245,7 +208,7 @@ impl SettingsWindow {
                 }
             })?);
         }
-        for descriptor in fields::descriptors() {
+        for descriptor in fields::descriptors().into_iter().filter(|descriptor| descriptor.page != Page::Profile) {
             self.connect_field(&descriptor)
                 .inspect_err(|error| tracing::error!(%error, key = descriptor.key, "connect_field failed"))?;
         }
@@ -258,6 +221,7 @@ impl SettingsWindow {
         std::mem::forget(install.Click(move |_, _| install_skin_from_file())?);
         let remove: Button = find(&self.root, "RemoveSkinButton")?;
         std::mem::forget(remove.Click(move |_, _| remove_selected_skin())?);
+        connect_profile_buttons(&self.root)?;
         Ok(())
     }
 
@@ -494,12 +458,10 @@ fn pick_archive() -> Option<std::path::PathBuf> {
     let mut buffer = vec![0u16; 1024];
     let filter: Vec<u16> = "Skin archives\0*.zip;*.tar;*.tar.gz;*.tgz\0All files\0*.*\0\0".encode_utf16().collect();
     let title: Vec<u16> = "Install skin\0".encode_utf16().collect();
-    let owner = OPEN
-        .with(|slot| slot.borrow().clone())
-        .and_then(|window| window.window.cast::<IWindowNative>().ok()?.handle().ok());
+    let owner = crate::workspace_host::window_handle();
     let mut dialog = OPENFILENAMEW {
         lStructSize: size_of::<OPENFILENAMEW>() as u32,
-        hwndOwner: HWND(owner.unwrap_or(0) as *mut core::ffi::c_void),
+        hwndOwner: HWND(owner as *mut core::ffi::c_void),
         lpstrFilter: windows_core::PCWSTR(filter.as_ptr()),
         nFilterIndex: 1,
         lpstrFile: windows_core::PWSTR(buffer.as_mut_ptr()),
@@ -513,4 +475,233 @@ fn pick_archive() -> Option<std::path::PathBuf> {
     }
     let length = buffer.iter().position(|unit| *unit == 0).unwrap_or(buffer.len());
     Some(std::path::PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
+}
+
+// ---- profiles page ----
+
+/// The profile being edited: the remembered selection if it still exists, else the default.
+fn selected_profile(settings: &Settings) -> String {
+    let remembered = SELECTED_PROFILE.with(|slot| slot.borrow().clone());
+    if settings.profile(&remembered).is_some() { remembered } else { settings.default_profile_name() }
+}
+
+fn select_profile(name: &str) {
+    SELECTED_PROFILE.with(|slot| *slot.borrow_mut() = name.to_owned());
+}
+
+fn profile_row_markup(profile: &winuake_config::profile::Profile, is_default: bool, selected: bool) -> String {
+    let background = if selected { "#FF3A4A5A" } else { "#00000000" };
+    let program = profile.program.clone().unwrap_or_else(|| "default shell".to_owned());
+    let tag = if is_default { "  (default)" } else { "" };
+    format!(
+        r#"<Border xmlns="{XAML_NAMESPACE}" Background="{background}" Padding="8" Margin="0,3,0,0" CornerRadius="4"><StackPanel><TextBlock Text="{}{tag}" Foreground="{TEXT}" FontSize="14"/><TextBlock Text="{}" Foreground="{DIM}" FontSize="12"/></StackPanel></Border>"#,
+        escape(&profile.name),
+        escape(&program),
+    )
+}
+
+fn profile_field_markup(descriptor: &FieldDescriptor, settings: &Settings, profile: &str) -> String {
+    let label = escape(descriptor.label);
+    let Some(value) = fields::read_profile_field(settings, profile, descriptor.key) else { return String::new() };
+    match (descriptor.kind, value) {
+        (FieldKind::Toggle, FieldValue::Bool(checked)) => format!(
+            r#"<CheckBox xmlns="{XAML_NAMESPACE}" x:Name="Field" xmlns:x="{XAML_X_NAMESPACE}" Content="{label}" IsChecked="{checked}" Foreground="{TEXT}" Margin="0,6,0,0"/>"#
+        ),
+        (_, value) => {
+            let text = match value {
+                FieldValue::Number(number) => number.to_string(),
+                FieldValue::Text(text) => text,
+                FieldValue::Bool(flag) => flag.to_string(),
+            };
+            format!(
+                r#"<StackPanel xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Margin="0,10,0,0"><TextBlock Text="{label}" Foreground="{DIM}" FontSize="12"/><TextBox x:Name="Field" Text="{}" MinWidth="320" HorizontalAlignment="Left"/></StackPanel>"#,
+                escape(&text)
+            )
+        }
+    }
+}
+
+/// Rebuilds the profile list and the fields of the selected profile.
+fn refresh_profile_page() {
+    let Some(window) = OPEN.with(|slot| slot.borrow().clone()) else { return };
+    let result = (|| -> Result<()> {
+        let settings = settings_store::current();
+        let selected = selected_profile(&settings);
+        select_profile(&selected);
+        let default_name = settings.default_profile_name();
+
+        let list: Panel = find(&window.root, "ProfileList")?;
+        let rows = list.Children()?;
+        rows.Clear()?;
+        for profile in &settings.profiles {
+            let row: FrameworkElement = XamlReader::Load(&HSTRING::from(profile_row_markup(
+                profile,
+                profile.name == default_name,
+                profile.name == selected,
+            )))?
+            .cast()?;
+            let name = profile.name.clone();
+            let ui: UIElement = row.cast()?;
+            std::mem::forget(ui.PointerPressed(move |_, _| {
+                select_profile(&name);
+                refresh_profile_page();
+            })?);
+            rows.Append(&ui)?;
+        }
+
+        let panel: Panel = find(&window.root, "ProfileFields")?;
+        let children = panel.Children()?;
+        children.Clear()?;
+        for descriptor in fields::descriptors().into_iter().filter(|descriptor| descriptor.page == Page::Profile) {
+            let markup = profile_field_markup(&descriptor, &settings, &selected);
+            if markup.is_empty() {
+                continue;
+            }
+            let row: FrameworkElement = XamlReader::Load(&HSTRING::from(markup))?.cast()?;
+            connect_profile_field(&row, &descriptor, &selected)?;
+            children.Append(&row.cast::<UIElement>()?)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        tracing::error!(%error, "could not show the profiles");
+    }
+}
+
+fn connect_profile_field(row: &FrameworkElement, descriptor: &FieldDescriptor, profile: &str) -> Result<()> {
+    let key = descriptor.key;
+    let profile = profile.to_owned();
+    match descriptor.kind {
+        FieldKind::Toggle => {
+            let check_box: ToggleButton = row.cast()?;
+            let source = check_box.clone();
+            std::mem::forget(check_box.Click(move |_, _| {
+                commit_profile(&profile, key, FieldValue::Bool(source.IsChecked().unwrap_or(false)));
+            })?);
+        }
+        kind => {
+            let text_box: TextBox = find(row, "Field")?;
+            let source = text_box.clone();
+            let ui: UIElement = text_box.cast()?;
+            std::mem::forget(ui.GotFocus(move |_, _| crate::terminal_view::suspend_text_routing())?);
+            std::mem::forget(ui.LostFocus(move |_, _| {
+                let text = source.Text().map(|text| text.to_string_lossy()).unwrap_or_default();
+                let value = match kind {
+                    FieldKind::Number { .. } => match text.trim().parse::<i64>() {
+                        Ok(number) => FieldValue::Number(number),
+                        Err(_) => {
+                            report(key, "must be a whole number");
+                            restore_profile_field(&source, &profile, key);
+                            return;
+                        }
+                    },
+                    _ => FieldValue::Text(text),
+                };
+                if !commit_profile(&profile, key, value) {
+                    restore_profile_field(&source, &profile, key);
+                }
+            })?);
+        }
+    }
+    Ok(())
+}
+
+fn restore_profile_field(text_box: &TextBox, profile: &str, key: &str) {
+    let Some(value) = fields::read_profile_field(&settings_store::current(), profile, key) else { return };
+    let text = match value {
+        FieldValue::Number(number) => number.to_string(),
+        FieldValue::Text(text) => text,
+        FieldValue::Bool(flag) => flag.to_string(),
+    };
+    let _ = text_box.SetText(&HSTRING::from(text));
+}
+
+/// Checks, saves and applies one profile field. Renaming moves the selection to the new name.
+fn commit_profile(profile: &str, key: &'static str, value: FieldValue) -> bool {
+    let mut candidate = settings_store::current();
+    if let Err(error) = fields::write_profile_field(&mut candidate, profile, key, value.clone()) {
+        report(key, &error.message);
+        return false;
+    }
+    let renamed_to = match (key, &value) {
+        ("profile.name", FieldValue::Text(text)) => Some(text.trim().to_owned()),
+        _ => None,
+    };
+    let profile_name = profile.to_owned();
+    settings_store::update(move |settings| {
+        let _ = fields::write_profile_field(settings, &profile_name, key, value);
+    });
+    if let Some(new_name) = renamed_to {
+        select_profile(&new_name);
+        refresh_profile_page();
+    }
+    report(key, "");
+    true
+}
+
+fn profile_status(message: &str) {
+    if let Some(window) = OPEN.with(|slot| slot.borrow().clone()) {
+        window.set_status(message);
+    }
+}
+
+fn connect_profile_buttons(root: &FrameworkElement) -> Result<()> {
+    let add: Button = find(root, "AddProfileButton")?;
+    std::mem::forget(add.Click(move |_, _| {
+        let name = settings_store::current().unique_profile_name("New profile");
+        let created = name.clone();
+        settings_store::update(move |settings| {
+            settings.add_profile(&created);
+        });
+        select_profile(&name);
+        refresh_profile_page();
+    })?);
+    let duplicate: Button = find(root, "DuplicateProfileButton")?;
+    std::mem::forget(duplicate.Click(move |_, _| {
+        let selected = selected_profile(&settings_store::current());
+        let mut preview = settings_store::current();
+        let Some(copy) = preview.duplicate_profile(&selected) else { return };
+        settings_store::update(move |settings| {
+            settings.duplicate_profile(&selected);
+        });
+        select_profile(&copy);
+        refresh_profile_page();
+    })?);
+    let delete: Button = find(root, "DeleteProfileButton")?;
+    std::mem::forget(delete.Click(move |_, _| {
+        let selected = selected_profile(&settings_store::current());
+        if settings_store::current().profiles.len() <= 1 {
+            profile_status("The last profile cannot be deleted.");
+            return;
+        }
+        profile_status("");
+        settings_store::update(move |settings| {
+            settings.delete_profile(&selected);
+        });
+        refresh_profile_page();
+    })?);
+    let default: Button = find(root, "DefaultProfileButton")?;
+    std::mem::forget(default.Click(move |_, _| {
+        let selected = selected_profile(&settings_store::current());
+        settings_store::update(move |settings| {
+            settings.set_default_profile(&selected);
+        });
+        refresh_profile_page();
+    })?);
+    let detect: Button = find(root, "DetectShellsButton")?;
+    std::mem::forget(detect.Click(move |_, _| {
+        let found = crate::shell_detection::detect();
+        let mut preview = settings_store::current();
+        let added = preview.merge_detected_profiles(found.clone());
+        settings_store::update(move |settings| {
+            settings.merge_detected_profiles(found);
+        });
+        profile_status(&match added {
+            0 => "No new shells found; profiles for the shells on this PC already exist.".to_owned(),
+            1 => "Added 1 profile.".to_owned(),
+            count => format!("Added {count} profiles."),
+        });
+        refresh_profile_page();
+    })?);
+    Ok(())
 }

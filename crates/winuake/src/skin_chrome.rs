@@ -275,6 +275,16 @@ impl SkinButtonViews {
         prefix: &str,
         on_click: impl Fn() + Send + 'static,
     ) -> Result<Option<Rc<Self>>> {
+        Self::connect_with_right_click(root, prefix, on_click, None)
+    }
+
+    /// Like `connect`, and a right click runs `on_right_click` (the plus button's profile menu) instead of counting as a click.
+    pub fn connect_with_right_click(
+        root: &FrameworkElement,
+        prefix: &str,
+        on_click: impl Fn() + Send + 'static,
+        on_right_click: Option<Box<dyn Fn() + Send>>,
+    ) -> Result<Option<Rc<Self>>> {
         let find = |name: String| -> Result<UIElement> { root.FindName(&HSTRING::from(name))?.cast() };
         let Ok(hit): Result<UIElement> = find(format!("{prefix}Button")) else { return Ok(None) };
         let views = Rc::new(Self {
@@ -300,9 +310,16 @@ impl SkinButtonViews {
                 views.refresh();
             });
         })?);
+        let pressed_target = hit.clone();
         std::mem::forget(hit.PointerPressed(move |_, args| {
             if let Some(args) = args.as_ref() {
                 let _ = args.SetHandled(true);
+                if is_right_button(args, &pressed_target) {
+                    if let Some(on_right_click) = &on_right_click {
+                        on_right_click();
+                    }
+                    return;
+                }
             }
             with_views(index, |views| {
                 views.pressed.set(true);
@@ -344,6 +361,14 @@ impl SkinButtonViews {
         let _ = self.over.SetVisibility(visibility(state == 1));
         let _ = self.down.SetVisibility(visibility(state == 2));
     }
+}
+
+/// Whether this press is the right mouse button.
+pub fn is_right_button(args: &crate::bindings::PointerRoutedEventArgs, relative_to: &UIElement) -> bool {
+    args.GetCurrentPoint(relative_to)
+        .and_then(|point| point.Properties())
+        .and_then(|properties| properties.IsRightButtonPressed())
+        .unwrap_or(false)
 }
 
 thread_local! {

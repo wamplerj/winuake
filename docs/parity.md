@@ -49,7 +49,7 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `close-session` | done | 4 | Ctrl+Shift+W, tab ×, middle click, menu |
 | `decrease-window-height` | done | 3 | Alt+Shift+Up |
 | `decrease-window-width` | done | 3 | Alt+Shift+Left |
-| `edit-profile` | done | 5 | Opens the Profile page of the settings window |
+| `edit-profile` | done | 10 | Opens the settings tab on the Profile page |
 | `grow-terminal-bottom` | done | 4 | Ctrl+Alt+Down, 10 DIPs |
 | `grow-terminal-left` | done | 4 | Ctrl+Alt+Left, 10 DIPs |
 | `grow-terminal-right` | done | 4 | Ctrl+Alt+Right, 10 DIPs |
@@ -57,7 +57,7 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `increase-window-height` | done | 3 | Alt+Shift+Down |
 | `increase-window-width` | done | 3 | Alt+Shift+Right |
 | `keep-open` | done | 4 | Title bar pin and menu; saved |
-| `manage-profiles` | done | 5 | Opens the Profile page of the settings window |
+| `manage-profiles` | done | 10 | Opens the settings tab on the Profile page: add, duplicate, delete, default, add detected shells (Windows PowerShell, PowerShell 7, Command Prompt, Git Bash, WSL) |
 | `move-session-left` | done | 4 | Ctrl+Shift+Left, tab menu |
 | `move-session-right` | done | 4 | Ctrl+Shift+Right, tab menu |
 | `new-session` | done | 4 | Ctrl+Shift+T, tab bar + |

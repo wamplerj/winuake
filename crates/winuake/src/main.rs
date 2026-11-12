@@ -36,6 +36,8 @@ mod settings_store;
 #[cfg(windows)]
 mod settings_window;
 #[cfg(windows)]
+mod shell_detection;
+#[cfg(windows)]
 mod single_instance;
 #[cfg(windows)]
 mod skin_assets;

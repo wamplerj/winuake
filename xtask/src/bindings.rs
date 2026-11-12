@@ -198,6 +198,7 @@ const RENDER_FILTERS: &[&str] = &[
 
 /// Win32 window management used by the drop-down host in `winuake`.
 const WINDOW_FILTERS: &[&str] = &[
+    "MF_POPUP",
     "RegCreateKeyExW",
     "RegSetValueExW",
     "RegDeleteValueW",

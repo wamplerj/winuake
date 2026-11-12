@@ -75,6 +75,8 @@ pub struct TerminalView {
     scheme: ColorScheme,
     /// Profile setting: when off the cursor stays solid.
     cursor_blink: bool,
+    /// A focus request has not succeeded yet (the view was not in the tree).
+    focus_wanted: Cell<bool>,
     characters: RefCell<CharacterAssembler>,
     /// Win32 handle of the application window; owns clipboard operations.
     window_handle: isize,
@@ -122,6 +124,7 @@ impl TerminalView {
             render: RefCell::new(RenderState { renderer, scale: 1.0 }),
             scheme,
             cursor_blink,
+            focus_wanted: Cell::new(false),
             characters: RefCell::new(CharacterAssembler::default()),
             window_handle,
             selecting: Cell::new(false),
@@ -168,6 +171,7 @@ impl TerminalView {
 
     /// Focuses the control now and again once XAML has laid it out: a view added a moment ago refuses focus until it is in the tree.
     pub fn focus(&self) {
+        self.focus_wanted.set(true);
         self.focus_now();
         let id = self.id;
         if let Ok(dispatcher) = DispatcherQueue::GetForCurrentThread() {
@@ -179,9 +183,12 @@ impl TerminalView {
         }
     }
 
+    /// Tries to give the control focus; a request that fails stays pending and is retried when the view gets its first real size.
     fn focus_now(&self) {
-        if let Err(error) = self.control.Focus(FocusState::Programmatic) {
-            tracing::warn!(terminal_id = %self.id, %error, "could not focus terminal");
+        match self.control.Focus(FocusState::Programmatic) {
+            Ok(true) => self.focus_wanted.set(false),
+            Ok(false) => {}
+            Err(error) => tracing::warn!(terminal_id = %self.id, %error, "could not focus terminal"),
         }
     }
 
@@ -262,6 +269,9 @@ impl TerminalView {
         let height = (self.panel.ActualHeight()? as f32 * scale).round() as u32;
         if width == 0 || height == 0 {
             return Ok(());
+        }
+        if self.focus_wanted.get() {
+            self.focus_now();
         }
 
         let grid = {
