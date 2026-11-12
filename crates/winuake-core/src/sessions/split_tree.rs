@@ -104,6 +104,8 @@ pub struct DividerLayout {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Node {
+    /// No terminals: the layout of a page session (settings).
+    Empty,
     Leaf(TerminalId),
     Split(Box<Split>),
 }
@@ -120,6 +122,7 @@ struct Split {
 impl Node {
     fn contains(&self, target: TerminalId) -> bool {
         match self {
+            Node::Empty => false,
             Node::Leaf(id) => *id == target,
             Node::Split(split) => split.first.contains(target) || split.second.contains(target),
         }
@@ -127,6 +130,7 @@ impl Node {
 
     fn collect_leaves(&self, into: &mut Vec<TerminalId>) {
         match self {
+            Node::Empty => {}
             Node::Leaf(id) => into.push(*id),
             Node::Split(split) => {
                 split.first.collect_leaves(into);
@@ -145,6 +149,11 @@ pub struct SplitTree {
 const MINIMUM_RATIO: f32 = 0.05;
 
 impl SplitTree {
+    /// A layout with no terminals.
+    pub fn empty() -> Self {
+        Self { root: Node::Empty }
+    }
+
     pub fn single(terminal: TerminalId) -> Self {
         Self { root: Node::Leaf(terminal) }
     }
@@ -187,7 +196,7 @@ impl SplitTree {
                 *node = Self::split_node(orientation, Node::Leaf(target), Node::Leaf(added));
                 true
             }
-            Node::Leaf(_) => false,
+            Node::Empty | Node::Leaf(_) => false,
             Node::Split(split) => {
                 Self::split_in(&mut split.first, target, orientation, added)
                     || Self::split_in(&mut split.second, target, orientation, added)
@@ -198,7 +207,7 @@ impl SplitTree {
     /// Removes `target`; its sibling takes the whole splitter. False when it is absent or the only terminal.
     pub fn remove(&mut self, target: TerminalId) -> bool {
         match &mut self.root {
-            Node::Leaf(_) => false,
+            Node::Empty | Node::Leaf(_) => false,
             root => Self::remove_in(root, target),
         }
     }
@@ -240,6 +249,7 @@ impl SplitTree {
         path: &mut SplitPath,
     ) {
         match node {
+            Node::Empty => {}
             Node::Leaf(terminal) => panes.push(PaneLayout { terminal: *terminal, rect: area }),
             Node::Split(split) => {
                 let [first_area, divider_area, second_area] = split.areas(area, divider);
@@ -358,6 +368,18 @@ mod tests {
 
     fn rect_of(tree: &SplitTree, terminal: TerminalId) -> PaneRect {
         tree.layout(AREA, 1).into_iter().find(|pane| pane.terminal == terminal).expect("terminal in layout").rect
+    }
+
+    #[test]
+    fn given_an_empty_layout_then_it_has_no_terminals_panes_or_dividers_and_nothing_can_split() {
+        let mut tree = SplitTree::empty();
+        assert!(tree.terminals_in_layout_order().is_empty());
+        assert!(tree.layout(AREA, 1).is_empty());
+        assert!(tree.dividers(AREA, 1).is_empty());
+        assert!(!tree.contains(A));
+        assert!(!tree.split(A, Orientation::Horizontal, B));
+        assert!(!tree.remove(A));
+        assert_eq!(tree.try_grow(A, GrowthDirection::Right, 10, AREA, 1, 5), None);
     }
 
     #[test]

@@ -11,6 +11,8 @@ pub enum SessionKind {
     TwoHorizontal,
     TwoVertical,
     Quad,
+    /// No terminals: a page of the app itself (settings) shown in a tab.
+    Page,
 }
 
 /// Per-terminal switches that Yakuake exposes in the tab context menu.
@@ -70,6 +72,7 @@ pub struct Session {
     /// Ordered by id: next/previous terminal walks this order, not the visual one (as in Yakuake).
     terminals: BTreeMap<TerminalId, TerminalState>,
     active: Option<TerminalId>,
+    page: bool,
 }
 
 impl Session {
@@ -86,6 +89,7 @@ impl Session {
                 SplitTree::pair(Orientation::Horizontal, new_terminal(ids), new_terminal(ids))
             }
             SessionKind::TwoVertical => SplitTree::pair(Orientation::Vertical, new_terminal(ids), new_terminal(ids)),
+            SessionKind::Page => SplitTree::empty(),
             SessionKind::Quad => {
                 let top = [new_terminal(ids), new_terminal(ids)];
                 let bottom = [new_terminal(ids), new_terminal(ids)];
@@ -94,11 +98,21 @@ impl Session {
         };
         let active = created.first().copied();
         let terminals = created.into_iter().map(|terminal| (terminal, TerminalState::new())).collect();
-        Self { id, title: String::new(), closable: true, tree, terminals, active }
+        Self { id, title: String::new(), closable: true, tree, terminals, active, page: kind == SessionKind::Page }
     }
 
     pub fn id(&self) -> SessionId {
         self.id
+    }
+
+    /// A page of the app (settings) rather than a set of terminals.
+    pub fn is_page(&self) -> bool {
+        self.page
+    }
+
+    /// Gives a page session its title (terminal sessions take theirs from the active terminal).
+    pub fn set_page_title(&mut self, title: &str) {
+        self.title = title.to_owned();
     }
 
     pub fn title(&self) -> &str {

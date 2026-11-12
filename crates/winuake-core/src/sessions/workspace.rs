@@ -8,6 +8,9 @@ use super::split_tree::{GrowthDirection, PaneRect};
 use super::tab_list::{TabList, TitleSource};
 use crate::ids::{SessionId, TerminalId};
 
+/// Title of the settings tab.
+pub const SETTINGS_TAB_TITLE: &str = "Settings";
+
 /// Settings that change how the workspace behaves. Phase 5 will load these from the config file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkspaceSettings {
@@ -47,6 +50,10 @@ pub enum WorkspaceEffect {
     },
     /// Show this session's panes.
     SessionRaised {
+        session: SessionId,
+    },
+    /// A page session (settings) was created: show its content in the session's pane area.
+    PageOpened {
         session: SessionId,
     },
     /// Give this terminal keyboard focus.
@@ -133,6 +140,8 @@ pub struct Workspace {
     stack: SessionStack,
     tabs: TabList,
     settings: WorkspaceSettings,
+    /// The tab showing the settings page, if open.
+    settings_session: Option<SessionId>,
 }
 
 impl Workspace {
@@ -180,6 +189,29 @@ impl Workspace {
         let mut effects = vec![WorkspaceEffect::SessionAdded { session, terminals, working_directory_from }];
         effects.extend(self.raise_session(session));
         effects
+    }
+
+    /// Opens the settings page as a tab, or raises it when it is already open.
+    pub fn open_settings_page(&mut self) -> Vec<WorkspaceEffect> {
+        if let Some(existing) = self.settings_session.filter(|id| self.stack.session(*id).is_some()) {
+            return self.raise_session(existing);
+        }
+        let session = self.stack.add_session(SessionKind::Page);
+        if let Some(page) = self.stack.session_mut(session) {
+            page.set_page_title(SETTINGS_TAB_TITLE);
+        }
+        self.settings_session = Some(session);
+        self.tabs.add(session, SETTINGS_TAB_TITLE);
+        let mut effects = vec![
+            WorkspaceEffect::SessionAdded { session, terminals: Vec::new(), working_directory_from: None },
+            WorkspaceEffect::PageOpened { session },
+        ];
+        effects.extend(self.raise_session(session));
+        effects
+    }
+
+    pub fn settings_session(&self) -> Option<SessionId> {
+        self.settings_session
     }
 
     pub fn raise_session(&mut self, session: SessionId) -> Vec<WorkspaceEffect> {
@@ -258,6 +290,9 @@ impl Workspace {
     }
 
     fn remove_session(&mut self, id: SessionId) -> Vec<WorkspaceEffect> {
+        if self.settings_session == Some(id) {
+            self.settings_session = None;
+        }
         let Some(removed) = self.stack.remove_session(id) else { return Vec::new() };
         let mut effects: Vec<WorkspaceEffect> = removed
             .terminal_ids()
@@ -974,5 +1009,66 @@ mod tests {
         assert_eq!(workspace.tabs().title(SessionId(0)), Some("less"));
         workspace.set_tab_title(SessionId(0), "auto", false);
         assert_eq!(workspace.tabs().title(SessionId(0)), Some("auto"));
+    }
+
+    #[test]
+    fn given_no_settings_tab_when_opening_the_settings_page_then_a_terminal_less_tab_is_added_and_raised() {
+        let mut workspace = workspace_with(1);
+        let effects = workspace.open_settings_page();
+        assert!(effects.contains(&WorkspaceEffect::SessionAdded {
+            session: SessionId(1),
+            terminals: Vec::new(),
+            working_directory_from: None
+        }));
+        assert!(effects.contains(&WorkspaceEffect::PageOpened { session: SessionId(1) }));
+        assert!(effects.contains(&WorkspaceEffect::SessionRaised { session: SessionId(1) }));
+        assert!(!effects.iter().any(|effect| matches!(effect, WorkspaceEffect::TerminalFocused { .. })));
+        assert_eq!(workspace.tabs().title(SessionId(1)), Some("Settings"));
+        assert_eq!(workspace.settings_session(), Some(SessionId(1)));
+        let page = workspace.stack().session(SessionId(1)).expect("session");
+        assert!(page.is_page() && page.terminal_count() == 0 && page.title() == "Settings");
+        assert_eq!(workspace.stack().active_terminal_id(), None);
+    }
+
+    #[test]
+    fn given_an_open_settings_tab_when_opening_it_again_then_the_same_tab_is_raised() {
+        let mut workspace = workspace_with(1);
+        workspace.open_settings_page();
+        workspace.raise_session(SessionId(0));
+        let effects = workspace.open_settings_page();
+        assert!(!effects.iter().any(|effect| matches!(effect, WorkspaceEffect::SessionAdded { .. })));
+        assert_eq!(selected(&workspace), Some(SessionId(1)));
+        assert_eq!(workspace.stack().count(), 2);
+    }
+
+    #[test]
+    fn given_the_settings_tab_when_closed_then_it_can_be_opened_again_as_a_new_tab() {
+        let mut workspace = workspace_with(1);
+        workspace.open_settings_page();
+        let CloseOutcome::Done(effects) = workspace.close_session(Some(SessionId(1)), Confirmation::Ask) else {
+            panic!("closed")
+        };
+        assert!(effects.contains(&WorkspaceEffect::SessionRemoved { session: SessionId(1) }));
+        assert_eq!(workspace.settings_session(), None);
+        workspace.open_settings_page();
+        assert_eq!(workspace.settings_session(), Some(SessionId(2)));
+    }
+
+    #[test]
+    fn given_the_settings_tab_is_active_when_splitting_or_closing_terminals_then_nothing_happens() {
+        let mut workspace = workspace_with(1);
+        workspace.open_settings_page();
+        assert!(workspace.split_left_right().is_empty());
+        assert!(workspace.focus_next_terminal().is_empty());
+        assert_eq!(workspace.close_active_terminal(None, Confirmation::Ask), CloseOutcome::Done(Vec::new()));
+        assert_eq!(workspace.stack().count(), 2);
+    }
+
+    #[test]
+    fn given_a_new_session_while_settings_is_active_then_it_starts_without_a_directory_source() {
+        let mut workspace = workspace_with(1);
+        workspace.open_settings_page();
+        let effects = workspace.add_session(SessionKind::Single);
+        assert!(matches!(&effects[0], WorkspaceEffect::SessionAdded { working_directory_from: None, .. }));
     }
 }
