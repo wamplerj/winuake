@@ -3,20 +3,16 @@
 
 use std::error::Error;
 use std::path::Path;
-use winuake_skin::raster::svg_to_png;
+use winuake_skin::raster::svg_to_square_png;
 
 const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
 
 pub fn generate(workspace_root: &Path) -> Result<(), Box<dyn Error>> {
     let source = workspace_root.join("assets").join("skins").join("default").join("icon.svg");
     let svg = std::fs::read(&source)?;
-    let natural = svg_to_png(&svg, 1)?.size;
     let mut images = Vec::new();
     for size in SIZES {
-        // Render at an integer multiple, then the PNG is the requested size only when the SVG is square; scale to fit the largest side.
-        let scale = size.div_ceil(natural.width.max(natural.height)).max(1);
-        let rendered = svg_to_png(&svg, scale)?;
-        images.push((size, rendered.png));
+        images.push((size, svg_to_square_png(&svg, size)?));
     }
     let directory = workspace_root.join("assets").join("icon");
     std::fs::create_dir_all(&directory)?;

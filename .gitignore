@@ -21,3 +21,4 @@ packages/
 # Coverage
 *.profraw
 lcov.info
+/dist/

@@ -1,0 +1,51 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to package (for example 1.0.0)"
+        required: true
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - run: cargo xtask gen-bindings
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT";
+          else echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"; fi
+      - name: Package x64 and ARM64
+        env:
+          WINUAKE_ISCC: C:\Program Files (x86)\Inno Setup 6\ISCC.exe
+          WINUAKE_RELEASE_BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.value }}
+        run: cargo xtask package --version ${{ steps.version.outputs.value }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winuake-${{ steps.version.outputs.value }}
+          path: |
+            dist/${{ steps.version.outputs.value }}/*.zip
+            dist/${{ steps.version.outputs.value }}/*-setup.exe
+            dist/${{ steps.version.outputs.value }}/*.msix
+            dist/${{ steps.version.outputs.value }}/SHA256SUMS.txt
+            dist/${{ steps.version.outputs.value }}/winget/*
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ steps.version.outputs.value }}/*.zip
+            dist/${{ steps.version.outputs.value }}/*-setup.exe
+            dist/${{ steps.version.outputs.value }}/*.msix
+            dist/${{ steps.version.outputs.value }}/SHA256SUMS.txt

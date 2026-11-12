@@ -2,6 +2,7 @@
 
 mod bindings;
 mod icon;
+mod package;
 mod winappsdk;
 
 use std::path::PathBuf;
@@ -18,9 +19,10 @@ fn main() -> ExitCode {
             })
         }
         Some("gen-icon") => icon::generate(&workspace_root),
+        Some("package") => package::run(&workspace_root, &std::env::args().skip(2).collect::<Vec<_>>()),
         Some("upstream-diff") => Err("upstream-diff: not implemented yet".into()),
         _ => {
-            eprintln!("usage: cargo xtask <gen-bindings|gen-icon|fetch-runtime|upstream-diff>");
+            eprintln!("usage: cargo xtask <gen-bindings|gen-icon|fetch-runtime|package|upstream-diff>");
             return ExitCode::from(2);
         }
     };

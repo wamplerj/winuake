@@ -43,6 +43,22 @@ pub fn svg_to_png(svg: &[u8], scale: u32) -> Result<RasterizedSvg, RasterError> 
     Ok(RasterizedSvg { png, size })
 }
 
+/// Renders SVG text into a square PNG of exactly `pixels` by `pixels` (the image is scaled to fit and centered), for icons.
+pub fn svg_to_square_png(svg: &[u8], pixels: u32) -> Result<Vec<u8>, RasterError> {
+    let tree = usvg::Tree::from_data(svg, &usvg::Options::default())
+        .map_err(|parse| RasterError { reason: parse.to_string() })?;
+    let natural = tree.size();
+    let pixels = pixels.max(1);
+    let mut pixmap = tiny_skia::Pixmap::new(pixels, pixels)
+        .ok_or_else(|| RasterError { reason: "the image is too large".to_owned() })?;
+    let scale = pixels as f32 / natural.width().max(natural.height());
+    let offset_x = (pixels as f32 - natural.width() * scale) / 2.0;
+    let offset_y = (pixels as f32 - natural.height() * scale) / 2.0;
+    let transform = tiny_skia::Transform::from_scale(scale, scale).post_translate(offset_x, offset_y);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    pixmap.encode_png().map_err(|encode| RasterError { reason: encode.to_string() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +91,18 @@ mod tests {
     fn given_text_that_is_not_svg_when_rasterizing_then_an_error_explains() {
         let error = svg_to_png(b"not svg", 1).unwrap_err();
         assert!(error.to_string().contains("cannot rasterize"), "{error}");
+    }
+
+    #[test]
+    fn given_a_wide_svg_when_rendering_a_square_icon_then_the_png_has_exactly_that_size() {
+        let png = svg_to_square_png(SQUARE.as_bytes(), 32).expect("renders");
+        assert_eq!(png_size(&png), Some(ImageSize { width: 32, height: 32 }));
+        let decoded = tiny_skia::Pixmap::decode_png(&png).expect("a valid png");
+        assert_eq!(decoded.pixel(16, 16).map(|pixel| pixel.alpha()), Some(255), "the middle is painted");
+        assert_eq!(
+            decoded.pixel(16, 1).map(|pixel| pixel.alpha()),
+            Some(0),
+            "the letterbox above the wide image is transparent"
+        );
     }
 }
