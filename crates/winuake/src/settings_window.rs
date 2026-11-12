@@ -129,7 +129,7 @@ fn window_markup(settings: &Settings) -> String {
         .iter()
         .map(|title| {
             format!(
-                r#"<TextBlock x:Name="Nav_{title}" Text="{title}" Foreground="{TEXT}" FontSize="14" Padding="12,10,12,10"/>"#
+                r##"<Grid x:Name="Nav_{title}" Background="#00000000"><Border x:Name="NavOff_{title}"><TextBlock Text="{title}" Foreground="{TEXT}" FontSize="14" Padding="14,10,12,10"/></Border><Border x:Name="NavOn_{title}" Background="#FF2D3A48" BorderBrush="#FF4FA3FF" BorderThickness="3,0,0,0" Visibility="Collapsed"><TextBlock Text="{title}" Foreground="#FFFFFFFF" FontWeight="SemiBold" FontSize="14" Padding="11,10,12,10"/></Border></Grid>"##
             )
         })
         .collect();
@@ -186,6 +186,10 @@ impl SettingsWindow {
             let page: UIElement = find(&self.root, &format!("Page_{title}"))?;
             let visible = title == name;
             page.SetVisibility(if visible { Visibility::Visible } else { Visibility::Collapsed })?;
+            // The page list on the left shows which page is open: a highlighted, bold entry with an accent bar.
+            let shown = |on: bool| if on { Visibility::Visible } else { Visibility::Collapsed };
+            find::<UIElement>(&self.root, &format!("NavOn_{title}"))?.SetVisibility(shown(visible))?;
+            find::<UIElement>(&self.root, &format!("NavOff_{title}"))?.SetVisibility(shown(!visible))?;
         }
         self.set_status("");
         Ok(())
@@ -452,12 +456,17 @@ fn remove_selected_skin() {
 
 /// Shows the Windows "open file" dialog for skin archives.
 fn pick_archive() -> Option<std::path::PathBuf> {
+    pick_file("Install skin", "Skin archives\0*.zip;*.tar;*.tar.gz;*.tgz\0All files\0*.*\0\0")
+}
+
+/// Shows the Windows "open file" dialog. `filter` is the double-NUL separated filter list of the Win32 dialog.
+fn pick_file(title: &str, filter: &str) -> Option<std::path::PathBuf> {
     use crate::window_bindings::{
         GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST, OPENFILENAMEW,
     };
     let mut buffer = vec![0u16; 1024];
-    let filter: Vec<u16> = "Skin archives\0*.zip;*.tar;*.tar.gz;*.tgz\0All files\0*.*\0\0".encode_utf16().collect();
-    let title: Vec<u16> = "Install skin\0".encode_utf16().collect();
+    let filter: Vec<u16> = filter.encode_utf16().collect();
+    let title: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
     let owner = crate::workspace_host::window_handle();
     let mut dialog = OPENFILENAMEW {
         lStructSize: size_of::<OPENFILENAMEW>() as u32,
@@ -475,6 +484,34 @@ fn pick_archive() -> Option<std::path::PathBuf> {
     }
     let length = buffer.iter().position(|unit| *unit == 0).unwrap_or(buffer.len());
     Some(std::path::PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
+}
+
+/// Shows the Windows folder picker.
+fn pick_folder(title: &str) -> Option<std::path::PathBuf> {
+    use crate::window_bindings::{
+        BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW, CoTaskMemFree, SHBrowseForFolderW, SHGetPathFromIDListW,
+    };
+    let title: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut display = vec![0u16; 260];
+    let browse = BROWSEINFOW {
+        hwndOwner: HWND(crate::workspace_host::window_handle() as *mut core::ffi::c_void),
+        pszDisplayName: windows_core::PWSTR(display.as_mut_ptr()),
+        lpszTitle: windows_core::PCWSTR(title.as_ptr()),
+        ulFlags: (BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE) as u32,
+        ..BROWSEINFOW::default()
+    };
+    let item = unsafe { SHBrowseForFolderW(&browse) };
+    if item.is_null() {
+        return None;
+    }
+    let mut path = vec![0u16; 1024];
+    let found = unsafe { SHGetPathFromIDListW(item, windows_core::PWSTR(path.as_mut_ptr())) }.as_bool();
+    unsafe { CoTaskMemFree(item.cast()) };
+    if !found {
+        return None;
+    }
+    let length = path.iter().position(|unit| *unit == 0).unwrap_or(path.len());
+    Some(std::path::PathBuf::from(String::from_utf16_lossy(&path[..length])))
 }
 
 // ---- profiles page ----
@@ -507,14 +544,19 @@ fn profile_field_markup(descriptor: &FieldDescriptor, settings: &Settings, profi
         (FieldKind::Toggle, FieldValue::Bool(checked)) => format!(
             r#"<CheckBox xmlns="{XAML_NAMESPACE}" x:Name="Field" xmlns:x="{XAML_X_NAMESPACE}" Content="{label}" IsChecked="{checked}" Foreground="{TEXT}" Margin="0,6,0,0"/>"#
         ),
-        (_, value) => {
+        (kind, value) => {
             let text = match value {
                 FieldValue::Number(number) => number.to_string(),
                 FieldValue::Text(text) => text,
                 FieldValue::Bool(flag) => flag.to_string(),
             };
+            let browse = if matches!(kind, FieldKind::FilePath | FieldKind::FolderPath) {
+                r#"<Button x:Name="Browse" Content="Browse..." Margin="8,0,0,0"/>"#
+            } else {
+                ""
+            };
             format!(
-                r#"<StackPanel xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Margin="0,10,0,0"><TextBlock Text="{label}" Foreground="{DIM}" FontSize="12"/><TextBox x:Name="Field" Text="{}" MinWidth="320" HorizontalAlignment="Left"/></StackPanel>"#,
+                r#"<StackPanel xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Margin="0,10,0,0"><TextBlock Text="{label}" Foreground="{DIM}" FontSize="12"/><StackPanel Orientation="Horizontal"><TextBox x:Name="Field" Text="{}" MinWidth="320" HorizontalAlignment="Left"/>{browse}</StackPanel></StackPanel>"#,
                 escape(&text)
             )
         }
@@ -584,7 +626,9 @@ fn connect_profile_field(row: &FrameworkElement, descriptor: &FieldDescriptor, p
             let source = text_box.clone();
             let ui: UIElement = text_box.cast()?;
             std::mem::forget(ui.GotFocus(move |_, _| crate::terminal_view::suspend_text_routing())?);
+            let lost_focus_profile = profile.clone();
             std::mem::forget(ui.LostFocus(move |_, _| {
+                let profile = lost_focus_profile.clone();
                 let text = source.Text().map(|text| text.to_string_lossy()).unwrap_or_default();
                 let value = match kind {
                     FieldKind::Number { .. } => match text.trim().parse::<i64>() {
@@ -601,8 +645,31 @@ fn connect_profile_field(row: &FrameworkElement, descriptor: &FieldDescriptor, p
                     restore_profile_field(&source, &profile, key);
                 }
             })?);
+            if matches!(kind, FieldKind::FilePath | FieldKind::FolderPath) {
+                connect_browse_button(row, kind, key, &profile)?;
+            }
         }
     }
+    Ok(())
+}
+
+/// The Browse... button of a path field: asks for a file or folder, shows it in the text box, and saves it.
+fn connect_browse_button(row: &FrameworkElement, kind: FieldKind, key: &'static str, profile: &str) -> Result<()> {
+    let browse: Button = find(row, "Browse")?;
+    let text_box: TextBox = find(row, "Field")?;
+    let profile = profile.to_owned();
+    std::mem::forget(browse.Click(move |_, _| {
+        let picked = match kind {
+            FieldKind::FolderPath => pick_folder("Choose the starting directory"),
+            _ => pick_file("Choose the program to run", "Programs\0*.exe;*.cmd;*.bat;*.com\0All files\0*.*\0\0"),
+        };
+        let Some(path) = picked else { return };
+        let text = path.display().to_string();
+        let _ = text_box.SetText(&HSTRING::from(text.as_str()));
+        if !commit_profile(&profile, key, FieldValue::Text(text)) {
+            restore_profile_field(&text_box, &profile, key);
+        }
+    })?);
     Ok(())
 }
 

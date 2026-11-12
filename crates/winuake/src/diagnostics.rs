@@ -13,6 +13,15 @@ use winuake_core::diagnostics::{CrashDetails, crash_file_name, crash_report, pan
 
 const LOG_FILES_KEPT: usize = 7;
 
+windows_link::link!("kernel32.dll" "system" fn GetStdHandle(handle_id: u32) -> isize);
+const STD_OUTPUT_HANDLE: u32 = -11_i32 as u32;
+
+/// True when stdout goes somewhere (a terminal the app was started from, or a redirect to a file). A program started from Explorer has none.
+fn stdout_is_attached() -> bool {
+    let handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    handle != 0 && handle != -1
+}
+
 /// Keeps the background log writer alive for the life of the process.
 static LOG_GUARD: Mutex<Option<WorkerGuard>> = Mutex::new(None);
 
@@ -33,7 +42,8 @@ pub fn initialize() {
             .build(&directory)
             .ok()
     });
-    let registry = tracing_subscriber::registry().with(filter).with(tracing_subscriber::fmt::layer());
+    let console = stdout_is_attached().then(tracing_subscriber::fmt::layer);
+    let registry = tracing_subscriber::registry().with(filter).with(console);
     match file_layer {
         Some(appender) => {
             let (writer, guard) = tracing_appender::non_blocking(appender);

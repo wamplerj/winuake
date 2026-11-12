@@ -1,5 +1,9 @@
 //! Winuake: drop-down terminal for Windows 11 (WinUI 3). Port of KDE Yakuake.
 
+// A window-less GUI program: no console window appears when it is started from Explorer, the Start menu or autostart. Logs go to the
+// rolling files in `%LOCALAPPDATA%\Winuake\logs` (and to stdout when it is redirected, which the development scripts use).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 #[cfg(windows)]
 mod application;
 #[cfg(windows)]

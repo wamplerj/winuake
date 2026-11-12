@@ -20,3 +20,9 @@ Settings opens as a tab and switches pages; detection found Windows PowerShell, 
 ## Drag to resize
 
 Drag the window's left or right edge to change its width, the bottom-left or bottom-right corner for width and height together; the title bar still drags the height. The edge you hold follows the pointer and the opposite edge stays put (width and horizontal position are adjusted together; measured from where the drag began so rounding to whole percents cannot make the other edge creep). Size cursors on the grips. Live while dragging, saved when released. `winuake-core::drop_down::resize_by_dragging` is the tested pure logic. Verified on the VM: right edge, left edge and corner drags changed width/height/position in the settings file. Limits: sizes are whole percents of the work area (steps of about 25 px on a 2560 px screen); no drag while full screen; the 6 px edge strips sit over the outermost terminal pixels.
+
+## Logging to files only, path pickers, current-page highlight
+
+- The app is a Windows GUI program (`windows_subsystem = "windows"`): no console window when started from Explorer, Start or autostart. Logs go to the rolling daily files in `%LOCALAPPDATA%\Winuake\logs` (7 kept); the console layer is only added when stdout is attached (started from a terminal or redirected), which the dev scripts rely on.
+- Profile page: Program and Starting directory have Browse... buttons (Win32 open-file and folder dialogs, `FieldKind::FilePath`/`FolderPath`); the picked path fills the box and saves. Typing still works.
+- Settings page list highlights the open page (accent bar, bold, lighter background). Verified on the VM; folder pick wrote `working_directory` to the settings file.

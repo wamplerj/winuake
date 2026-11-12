@@ -37,6 +37,10 @@ pub enum FieldKind {
     Color,
     /// One of the listed names.
     Choice(&'static [&'static str]),
+    /// Path of a file, picked with a file dialog (a text box too).
+    FilePath,
+    /// Path of a folder, picked with a folder dialog.
+    FolderPath,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -143,9 +147,14 @@ pub fn descriptors() -> Vec<FieldDescriptor> {
             MILLISECONDS,
         ),
         field(Profile, "profile.name", "Profile name", Text),
-        field(Profile, "profile.program", "Program (empty uses PowerShell, then cmd)", Text),
+        field(Profile, "profile.program", "Program (empty uses PowerShell, then cmd)", FieldKind::FilePath),
         field(Profile, "profile.arguments", "Arguments (space separated)", Text),
-        field(Profile, "profile.working_directory", "Starting directory (empty uses your user folder)", Text),
+        field(
+            Profile,
+            "profile.working_directory",
+            "Starting directory (empty uses your user folder)",
+            FieldKind::FolderPath,
+        ),
         field(Profile, "profile.font_family", "Font", Text),
         field(Profile, "profile.font_size_points", "Font size (points)", FieldKind::Number { minimum: 6, maximum: 72 }),
         field(Profile, "profile.color_scheme", "Color scheme", Text),
@@ -340,7 +349,8 @@ pub fn write(settings: &mut Settings, key: &str, value: FieldValue) -> Result<()
 fn validate(descriptor: &FieldDescriptor, value: FieldValue) -> Result<FieldValue, FieldError> {
     let key = descriptor.key;
     match (descriptor.kind, &value) {
-        (FieldKind::Toggle, FieldValue::Bool(_)) | (FieldKind::Text, FieldValue::Text(_)) => Ok(value),
+        (FieldKind::Toggle, FieldValue::Bool(_))
+        | (FieldKind::Text | FieldKind::FilePath | FieldKind::FolderPath, FieldValue::Text(_)) => Ok(value),
         (FieldKind::Number { minimum, maximum }, FieldValue::Number(number)) => {
             if (minimum..=maximum).contains(number) {
                 Ok(value)
@@ -430,7 +440,13 @@ mod tests {
             let matches = match descriptor.kind {
                 FieldKind::Toggle => matches!(value, FieldValue::Bool(_)),
                 FieldKind::Number { .. } => matches!(value, FieldValue::Number(_)),
-                FieldKind::Text | FieldKind::Color | FieldKind::Choice(_) => matches!(value, FieldValue::Text(_)),
+                FieldKind::Text
+                | FieldKind::Color
+                | FieldKind::Choice(_)
+                | FieldKind::FilePath
+                | FieldKind::FolderPath => {
+                    matches!(value, FieldValue::Text(_))
+                }
             };
             assert!(matches, "{} has the wrong value kind: {value:?}", descriptor.key);
         }

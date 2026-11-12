@@ -206,6 +206,13 @@ const RENDER_FILTERS: &[&str] = &[
 
 /// Win32 window management used by the drop-down host in `winuake`.
 const WINDOW_FILTERS: &[&str] = &[
+    "SHBrowseForFolderW",
+    "BROWSEINFOW",
+    "SHGetPathFromIDListW",
+    "CoTaskMemFree",
+    "BIF_RETURNONLYFSDIRS",
+    "BIF_NEWDIALOGSTYLE",
+    "BIF_USENEWUI",
     "MF_POPUP",
     "RegCreateKeyExW",
     "RegSetValueExW",
