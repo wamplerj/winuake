@@ -28,4 +28,4 @@ Built, PE machine type `AA64`, bootstrap DLL arm64, installer and MSIX produced 
 - Real code-signing certificate and the real repository name (needed for the published manifest).
 - Run ARM64 on ARM hardware.
 - Version bump and tag (maintainer).
-- The VM was rebooted to clear the hung Phase 3 processes. It does not sign in automatically and the sign-in screen rejected an empty password, so it is waiting at the sign-in screen for the account's password; interactive tests (anything that needs the desktop) cannot run until someone signs in at the console.
+- The VM was rebooted and signed in again: the hung Phase 3 processes are gone. The real global hotkey (Ctrl+`, since F12 and Win+` are taken by Windows) toggled the window, and the signed 0.9.1 MSIX installed, ran as the only instance (no `WINUAKE_ALLOW_MULTIPLE`), answered `winuake-cli`, and was removed again.
