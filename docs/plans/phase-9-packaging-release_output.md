@@ -19,13 +19,13 @@ Built, PE machine type `AA64`, bootstrap DLL arm64, installer and MSIX produced 
 
 - **Icon**: Winuake now has its own icon (`assets/icon/winuake.svg`, rendered by `cargo xtask gen-icon` into `winuake.ico` and the MSIX logos).
 - **Signing**: with `WINUAKE_SIGN_PFX` the packager signs `winuake.exe`, `winuake-cli.exe`, each installer and each MSIX (SHA-256, RFC 3161 timestamp). Verified on the VM with the throwaway certificate: all four signed artifact kinds carry a signature and timestamp for both architectures (status "untrusted root", as expected for a self-signed certificate). A real certificate is still needed for a public release; `docs/releasing.md` explains the steps.
-- **winget manifest**: `--repo OWNER/NAME` (or `WINUAKE_REPOSITORY`) fills the installer and locale URLs; without it the placeholder is used and a warning printed. Checked in a test package run.
+- **winget manifest**: `--repo OWNER/NAME` (or `WINUAKE_REPOSITORY`) fills the installer and locale URLs; the default is `wamplerj/winuake`. Checked in a test package run.
 - **Crash report**: `WINUAKE_TEST_PANIC=1 winuake.exe` panics at startup; the VM produced `crash-<time>.txt` with version, architecture, message and location, and the log line.
 - Minor: the manifest already sets DPI awareness, so the runtime call's harmless "access denied" is no longer printed.
 
 ## Still open
 
-- Real code-signing certificate and the real repository name (needed for the published manifest).
+- Real code-signing certificate.
 - Run ARM64 on ARM hardware.
 - Version bump and tag (maintainer).
 - The VM was rebooted and signed in again: the hung Phase 3 processes are gone. The real global hotkey (Ctrl+`, since F12 and Win+` are taken by Windows) toggled the window, and the signed 0.9.1 MSIX installed, ran as the only instance (no `WINUAKE_ALLOW_MULTIPLE`), answered `winuake-cli`, and was removed again.

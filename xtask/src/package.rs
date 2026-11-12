@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const PRODUCT: &str = "Winuake";
+/// Where release assets live unless `--repo` says otherwise.
+const DEFAULT_REPOSITORY: &str = "wamplerj/winuake";
 const PUBLISHER: &str = "Winuake contributors";
 const INNO_APP_ID: &str = "3B1B6D2E-7A4F-4C0E-9C1A-5E8F2D7B6A11";
 const MSIX_PUBLISHER: &str = "CN=Winuake Dev";
@@ -580,10 +582,7 @@ fn write_winget_manifest(
     version: &str,
     repository: Option<&str>,
 ) -> Result<(), Box<dyn Error>> {
-    let repository = repository.unwrap_or("OWNER/winuake");
-    if repository.starts_with("OWNER/") {
-        eprintln!("warning: winget manifest uses the placeholder repository {repository}; pass --repo OWNER/NAME");
-    }
+    let repository = repository.unwrap_or(DEFAULT_REPOSITORY);
     let base = std::env::var("WINUAKE_RELEASE_BASE_URL")
         .unwrap_or_else(|_| format!("https://github.com/{repository}/releases/download/v{version}"));
     let directory = distribution.join("winget");

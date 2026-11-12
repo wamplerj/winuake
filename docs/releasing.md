@@ -16,7 +16,7 @@ For a public release use a code-signing certificate whose subject equals the MSI
 ```
 set WINUAKE_SIGN_PFX=C:\path\to\certificate.pfx
 set WINUAKE_SIGN_PASSWORD=...
-cargo xtask package --version 1.0.0 --repo OWNER/NAME
+cargo xtask package --version 1.0.0 --repo wamplerj/winuake
 ```
 
 The executables, the installer and the MSIX are then signed with SHA-256 and an RFC 3161 timestamp (`WINUAKE_TIMESTAMP_URL`, default DigiCert). In CI store the PFX as a secret, write it to a file in a step and pass its path.
@@ -25,7 +25,7 @@ The executables, the installer and the MSIX are then signed with SHA-256 and an 
 
 1. Bump `version` in the root `Cargo.toml` and the manifest version in `crates/winuake/winuake.manifest`.
 2. Update `docs/release-notes-1.0.md` (rename per version), `docs/parity.md`, `UPSTREAM.md` (`cargo xtask upstream-diff` shows unreviewed Yakuake commits).
-3. `cargo xtask package --version X.Y.Z --repo OWNER/NAME`. Output in `dist/X.Y.Z/`: zips, installers, MSIX, `SHA256SUMS.txt`, `winget/` manifests, for x64 and ARM64.
+3. `cargo xtask package --version X.Y.Z --repo wamplerj/winuake`. Output in `dist/X.Y.Z/`: zips, installers, MSIX, `SHA256SUMS.txt`, `winget/` manifests, for x64 and ARM64.
 4. Test an installer and the MSIX on x64 (and on ARM64 hardware if you have it).
 5. Tag `vX.Y.Z` and push: the release workflow attaches the files to a GitHub release.
 6. winget: copy `dist/X.Y.Z/winget/*` into a fork of `microsoft/winget-pkgs` under `manifests/w/Winuake/Winuake/X.Y.Z/` and open a pull request (or use `wingetcreate`). The installer manifest points at the release assets and carries their hashes.
