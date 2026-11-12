@@ -11,13 +11,19 @@ fn main() {
     let manifest_directory = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
     let workspace_root =
         manifest_directory.parent().and_then(|path| path.parent()).expect("crate lives in workspace/crates");
+    // The bootstrap DLL must match the architecture being built.
+    let runtime_directory = match std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+        Ok("aarch64") => "win-arm64",
+        Ok("x86") => "win-x86",
+        _ => "win-x64",
+    };
     let bootstrap_dll = workspace_root
         .join("target")
         .join("winappsdk")
         .join("2.6.5")
         .join("Foundation")
         .join("runtimes")
-        .join("win-x64")
+        .join(runtime_directory)
         .join("native")
         .join("Microsoft.WindowsAppRuntime.Bootstrap.dll");
     println!("cargo:rerun-if-changed={}", bootstrap_dll.display());
