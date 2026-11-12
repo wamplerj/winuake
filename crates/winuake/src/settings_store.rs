@@ -133,6 +133,30 @@ pub fn update(change: impl FnOnce(&mut Settings)) {
     }
 }
 
+/// Changes settings and applies them everywhere without writing the file, for drags that change them many times a second.
+/// Call `save_current` when the drag ends.
+pub fn update_live(change: impl FnOnce(&mut Settings)) {
+    let settings = STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let state = state.as_mut()?;
+        change(&mut state.current);
+        state.current.window = state.current.window.clone().clamped();
+        Some(state.current.clone())
+    });
+    if let Some(settings) = settings {
+        apply(&settings);
+    }
+}
+
+/// Writes the current settings to the file.
+pub fn save_current() {
+    STATE.with(|state| {
+        if let Some(state) = state.borrow_mut().as_mut() {
+            save(state);
+        }
+    });
+}
+
 /// The drop-down controller changed the window settings itself (resize shortcuts): save them without re-applying to the window.
 pub fn persist_window(window: &WindowSettings) {
     STATE.with(|state| {

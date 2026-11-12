@@ -83,6 +83,57 @@ pub fn height_percent_for_pointer(pointer_y: i32, work_area: Rect) -> u8 {
     percent.clamp(10, 100) as u8
 }
 
+/// Which edge of the window a resize drag holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizeEdge {
+    Left,
+    Right,
+    /// Bottom-left corner: width from the left edge and height together.
+    BottomLeft,
+    BottomRight,
+}
+
+/// Size and horizontal position (percent of the work area) after a drag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResizedWindow {
+    pub width_percent: u8,
+    pub height_percent: u8,
+    pub position_percent: u8,
+}
+
+fn percent(value: i64, whole: i64) -> i64 {
+    (value * 100 + whole / 2) / whole.max(1)
+}
+
+/// New width, height and position when an edge is dragged to `pointer`. The opposite edge stays where it is, so the window grows and
+/// shrinks under the pointer. Widths snap to whole percents (the settings are whole percents) and stay within 10..=100.
+pub fn resize_by_dragging(edge: ResizeEdge, pointer: Point, work_area: Rect, current: ResizedWindow) -> ResizedWindow {
+    let work_width = i64::from((work_area.right - work_area.left).max(1));
+    let left = i64::from(work_area.left)
+        + work_width * i64::from(current.position_percent) * i64::from(100 - i32::from(current.width_percent)) / 10_000;
+    let right = left + work_width * i64::from(current.width_percent) / 100;
+    let pointer_x = i64::from(pointer.x);
+
+    let dragging_left = matches!(edge, ResizeEdge::Left | ResizeEdge::BottomLeft);
+    let (width_percent, fixed_left) = if dragging_left {
+        let width = percent(right - pointer_x, work_width).clamp(10, 100);
+        (width, right - work_width * width / 100)
+    } else {
+        (percent(pointer_x - left, work_width).clamp(10, 100), left)
+    };
+    let free_space = work_width * (100 - width_percent);
+    let position_percent = if free_space == 0 {
+        i64::from(current.position_percent)
+    } else {
+        ((fixed_left - i64::from(work_area.left)) * 10_000 / free_space).clamp(0, 100)
+    };
+    let height_percent = match edge {
+        ResizeEdge::BottomLeft | ResizeEdge::BottomRight => height_percent_for_pointer(pointer.y, work_area),
+        ResizeEdge::Left | ResizeEdge::Right => current.height_percent,
+    };
+    ResizedWindow { width_percent: width_percent as u8, height_percent, position_percent: position_percent as u8 }
+}
+
 pub fn select_screen(screen_setting: u32, monitors: &[Monitor], pointer: Point) -> usize {
     if screen_setting >= 1 && (screen_setting as usize) <= monitors.len() {
         return screen_setting as usize - 1;
@@ -219,5 +270,63 @@ mod tests {
         let work = Rect::new(0, 0, 1000, 1000);
         assert_eq!(height_percent_for_pointer(-50, work), 10);
         assert_eq!(height_percent_for_pointer(5000, work), 100);
+    }
+
+    const SCREEN: Rect = Rect::new(0, 0, 1000, 800);
+    const CENTERED_HALF: ResizedWindow = ResizedWindow { width_percent: 50, height_percent: 40, position_percent: 50 };
+
+    #[test]
+    fn given_a_centered_window_when_dragging_the_right_edge_out_then_the_left_edge_stays_put() {
+        let resized = resize_by_dragging(ResizeEdge::Right, Point { x: 850, y: 100 }, SCREEN, CENTERED_HALF);
+        assert_eq!(resized.width_percent, 60, "left edge at 250, pointer at 850");
+        assert_eq!(resized.position_percent, 62, "250 / (1000 * 40%) = 62.5 percent");
+        assert_eq!(resized.height_percent, 40);
+    }
+
+    #[test]
+    fn given_a_centered_window_when_dragging_the_left_edge_in_then_the_right_edge_stays_put() {
+        let resized = resize_by_dragging(ResizeEdge::Left, Point { x: 400, y: 100 }, SCREEN, CENTERED_HALF);
+        assert_eq!(resized.width_percent, 35, "right edge at 750, pointer at 400");
+        assert_eq!(resized.position_percent, 61, "left edge 400 / (1000 * 65%) = 61.5 percent, truncated");
+    }
+
+    #[test]
+    fn given_a_drag_past_the_screen_when_resizing_then_the_width_stops_at_100_percent_and_the_position_is_kept() {
+        let resized = resize_by_dragging(
+            ResizeEdge::Right,
+            Point { x: 5000, y: 0 },
+            SCREEN,
+            ResizedWindow { position_percent: 0, ..CENTERED_HALF },
+        );
+        assert_eq!((resized.width_percent, resized.position_percent), (100, 0));
+        let from_full = resize_by_dragging(
+            ResizeEdge::Left,
+            Point { x: 5000, y: 0 },
+            SCREEN,
+            ResizedWindow { width_percent: 100, ..CENTERED_HALF },
+        );
+        assert_eq!(from_full.width_percent, 10, "never smaller than 10 percent");
+    }
+
+    #[test]
+    fn given_a_corner_drag_when_resizing_then_width_and_height_change_together() {
+        let resized = resize_by_dragging(ResizeEdge::BottomRight, Point { x: 900, y: 600 }, SCREEN, CENTERED_HALF);
+        assert_eq!(resized.width_percent, 65);
+        assert_eq!(resized.height_percent, 75);
+        let left_corner = resize_by_dragging(ResizeEdge::BottomLeft, Point { x: 100, y: 200 }, SCREEN, CENTERED_HALF);
+        assert_eq!(left_corner.width_percent, 65);
+        assert_eq!(left_corner.height_percent, 25);
+    }
+
+    #[test]
+    fn given_a_work_area_that_does_not_start_at_zero_when_resizing_then_positions_are_relative_to_it() {
+        let work = Rect::new(1000, 0, 2000, 800);
+        let resized = resize_by_dragging(
+            ResizeEdge::Right,
+            Point { x: 1750, y: 0 },
+            work,
+            ResizedWindow { width_percent: 50, height_percent: 40, position_percent: 0 },
+        );
+        assert_eq!((resized.width_percent, resized.position_percent), (75, 0));
     }
 }

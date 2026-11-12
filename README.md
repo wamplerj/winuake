@@ -23,6 +23,7 @@ First start shows a dialog to pick the global hotkey. Settings: title-bar menu >
 
 - `docs/parity.md`: every Yakuake setting, action, scripting method and skin key and its status.
 - `docs/scripting.md`: `winuake-cli`, the named-pipe protocol, `qdbus` equivalents.
+- Resize: drag the left or right edge for width, the bottom corners for width and height together, or the title bar for height (saved as the Width, Height and Position settings, in whole percents of the screen).
 - Skins: Settings > Skins (install `.zip`/`.tar.gz`). Shortcuts: Settings > Shortcuts.
 
 ## Build

@@ -30,6 +30,8 @@ mod flashes;
 #[cfg(windows)]
 mod message_hook;
 #[cfg(windows)]
+mod resize_grips;
+#[cfg(windows)]
 mod script_server;
 #[cfg(windows)]
 mod settings_store;

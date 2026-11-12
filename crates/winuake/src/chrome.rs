@@ -135,6 +135,7 @@ fn press(element: &UIElement, action: impl Fn() + Send + 'static) -> Result<()> 
 
 impl Chrome {
     pub fn create() -> Result<Self> {
+        let grips = crate::resize_grips::GRIP_MARKUP;
         let markup = format!(
             r##"<Grid xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Background="#00000000">
   <Grid.RowDefinitions>
@@ -143,10 +144,11 @@ impl Chrome {
   <ContentControl x:Name="BorderHost" Grid.Row="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" IsTabStop="False"/>
   <ContentControl x:Name="ContentHost" Grid.Row="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" IsTabStop="False"/>
   <ContentControl x:Name="TabHost" Grid.Row="1" HorizontalContentAlignment="Stretch" IsTabStop="False" Padding="0"/>
-  <ContentControl x:Name="TitleHost" Grid.Row="2" HorizontalContentAlignment="Stretch" IsTabStop="False" Padding="0"/>
+  <ContentControl x:Name="TitleHost" Grid.Row="2" HorizontalContentAlignment="Stretch" IsTabStop="False" Padding="0"/>{grips}
 </Grid>"##
         );
         let root_element = load(&markup)?;
+        crate::resize_grips::connect(&root_element)?;
         Ok(Self {
             root: root_element.cast()?,
             border_host: find(&root_element, "BorderHost")?,

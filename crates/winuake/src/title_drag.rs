@@ -24,7 +24,9 @@ pub fn connect(title_bar: &UIElement) -> Result<()> {
     })?);
     let release = title_bar.clone();
     std::mem::forget(title_bar.PointerReleased(move |_, args| {
-        DRAGGING.with(|flag| flag.set(false));
+        if DRAGGING.with(|flag| flag.replace(false)) {
+            crate::settings_store::save_current();
+        }
         if let Some(args) = args.as_ref()
             && let Ok(pointer) = args.Pointer()
         {

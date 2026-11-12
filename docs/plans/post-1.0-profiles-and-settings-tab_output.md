@@ -16,3 +16,7 @@ Settings opens as a tab and switches pages; detection found Windows PowerShell, 
 - Profile and scheme changes still apply to new terminals only. No per-profile shortcut or icon. Scripting `addSession` always uses the default profile.
 - PowerShell 7 and WSL detection are covered by tests but this VM has neither.
 - Global shortcuts (such as Ctrl+Shift+T) do not work while a text box in the settings tab has focus.
+
+## Drag to resize
+
+Drag the window's left or right edge to change its width, the bottom-left or bottom-right corner for width and height together; the title bar still drags the height. The edge you hold follows the pointer and the opposite edge stays put (width and horizontal position are adjusted together; measured from where the drag began so rounding to whole percents cannot make the other edge creep). Size cursors on the grips. Live while dragging, saved when released. `winuake-core::drop_down::resize_by_dragging` is the tested pure logic. Verified on the VM: right edge, left edge and corner drags changed width/height/position in the settings file. Limits: sizes are whole percents of the work area (steps of about 25 px on a 2560 px screen); no drag while full screen; the 6 px edge strips sit over the outermost terminal pixels.

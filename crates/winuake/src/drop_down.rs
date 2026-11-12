@@ -506,7 +506,8 @@ pub fn retract_if_visible() {
     });
 }
 
-/// Title-bar drag: sets the window height from the pointer's vertical position on the screen it is on.
+/// Title-bar drag: sets the window height from the pointer's vertical position on the screen it is on. Live only; `settings_store::save_current`
+/// saves when the drag ends.
 pub fn set_height_from_pointer() {
     let monitors = enumerate_monitors();
     let pointer = cursor_position();
@@ -515,8 +516,48 @@ pub fn set_height_from_pointer() {
     };
     let percent = winuake_core::drop_down::height_percent_for_pointer(pointer.y, monitor.work_area);
     if crate::settings_store::current().window.height_percent != percent {
-        crate::settings_store::update(|settings| settings.window.height_percent = percent);
+        crate::settings_store::update_live(|settings| settings.window.height_percent = percent);
     }
+}
+
+/// The size and position settings a resize drag starts from.
+pub fn current_placement() -> winuake_core::drop_down::ResizedWindow {
+    let window = crate::settings_store::current().window;
+    winuake_core::drop_down::ResizedWindow {
+        width_percent: window.width_percent,
+        height_percent: window.height_percent,
+        position_percent: window.position_percent,
+    }
+}
+
+/// Edge or corner drag: resizes the window so the held edge follows the pointer and the opposite edge stays put. Live only.
+pub fn resize_from_pointer(edge: winuake_core::drop_down::ResizeEdge, start: winuake_core::drop_down::ResizedWindow) {
+    if with_host_value(|host| host.controller.borrow().is_fullscreen()).unwrap_or(true) {
+        return;
+    }
+    let monitors = enumerate_monitors();
+    let pointer = cursor_position();
+    let Some(monitor) = monitors.iter().find(|monitor| monitor.bounds.contains(pointer)).or(monitors.first()) else {
+        return;
+    };
+    let current = crate::settings_store::current().window;
+    // Measured from where the drag began, so rounding to whole percents cannot make the fixed edge creep.
+    let resized = winuake_core::drop_down::resize_by_dragging(edge, pointer, monitor.work_area, start);
+    if (resized.width_percent, resized.height_percent, resized.position_percent)
+        != (current.width_percent, current.height_percent, current.position_percent)
+    {
+        crate::settings_store::update_live(|settings| {
+            settings.window.width_percent = resized.width_percent;
+            settings.window.height_percent = resized.height_percent;
+            settings.window.position_percent = resized.position_percent;
+        });
+    }
+}
+
+fn with_host_value<T>(read: impl FnOnce(&DropDownHost) -> T) -> Option<T> {
+    let mut value = None;
+    with_host(|host| value = Some(read(host)));
+    value
 }
 
 /// True while the window is open or sliding open.
