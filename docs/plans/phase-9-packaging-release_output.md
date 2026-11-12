@@ -15,10 +15,17 @@ Installer: silent install, files, PATH entry, `winuake-cli` works from the insta
 
 Built, PE machine type `AA64`, bootstrap DLL arm64, installer and MSIX produced and signed. **Not run**: the VM is x64 and cannot execute ARM64 binaries.
 
-## Not done / follow-ups
+## Open items, follow-up pass
 
-- Real signing certificate and the repository URL for the winget manifest (`OWNER` placeholders, `WINUAKE_RELEASE_BASE_URL`); installer itself is unsigned.
-- A Winuake-specific icon.
-- Crash report writing is unit-tested (formatting) but a real panic was not triggered on the VM.
-- Three hung dev processes from Phase 3 remain on the VM (they block the single-instance lock, so the packaged test used `WINUAKE_ALLOW_MULTIPLE`); a VM reboot clears them.
-- Version is still `0.1.0` in `Cargo.toml`; bump to 1.0.0 and tag when you decide to release.
+- **Icon**: Winuake now has its own icon (`assets/icon/winuake.svg`, rendered by `cargo xtask gen-icon` into `winuake.ico` and the MSIX logos).
+- **Signing**: with `WINUAKE_SIGN_PFX` the packager signs `winuake.exe`, `winuake-cli.exe`, each installer and each MSIX (SHA-256, RFC 3161 timestamp). Verified on the VM with the throwaway certificate: all four signed artifact kinds carry a signature and timestamp for both architectures (status "untrusted root", as expected for a self-signed certificate). A real certificate is still needed for a public release; `docs/releasing.md` explains the steps.
+- **winget manifest**: `--repo OWNER/NAME` (or `WINUAKE_REPOSITORY`) fills the installer and locale URLs; without it the placeholder is used and a warning printed. Checked in a test package run.
+- **Crash report**: `WINUAKE_TEST_PANIC=1 winuake.exe` panics at startup; the VM produced `crash-<time>.txt` with version, architecture, message and location, and the log line.
+- Minor: the manifest already sets DPI awareness, so the runtime call's harmless "access denied" is no longer printed.
+
+## Still open
+
+- Real code-signing certificate and the real repository name (needed for the published manifest).
+- Run ARM64 on ARM hardware.
+- Version bump and tag (maintainer).
+- The VM was rebooted to clear the hung Phase 3 processes. It does not sign in automatically and the sign-in screen rejected an empty password, so it is waiting at the sign-in screen for the account's password; interactive tests (anything that needs the desktop) cannot run until someone signs in at the console.
