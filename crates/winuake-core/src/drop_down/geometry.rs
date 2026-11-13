@@ -88,6 +88,8 @@ pub fn height_percent_for_pointer(pointer_y: i32, work_area: Rect) -> u8 {
 pub enum ResizeEdge {
     Left,
     Right,
+    /// Bottom edge: height only.
+    Bottom,
     /// Bottom-left corner: width from the left edge and height together.
     BottomLeft,
     BottomRight,
@@ -108,6 +110,9 @@ fn percent(value: i64, whole: i64) -> i64 {
 /// New width, height and position when an edge is dragged to `pointer`. The opposite edge stays where it is, so the window grows and
 /// shrinks under the pointer. Widths snap to whole percents (the settings are whole percents) and stay within 10..=100.
 pub fn resize_by_dragging(edge: ResizeEdge, pointer: Point, work_area: Rect, current: ResizedWindow) -> ResizedWindow {
+    if edge == ResizeEdge::Bottom {
+        return ResizedWindow { height_percent: height_percent_for_pointer(pointer.y, work_area), ..current };
+    }
     let work_width = i64::from((work_area.right - work_area.left).max(1));
     let left = i64::from(work_area.left)
         + work_width * i64::from(current.position_percent) * i64::from(100 - i32::from(current.width_percent)) / 10_000;
@@ -129,7 +134,7 @@ pub fn resize_by_dragging(edge: ResizeEdge, pointer: Point, work_area: Rect, cur
     };
     let height_percent = match edge {
         ResizeEdge::BottomLeft | ResizeEdge::BottomRight => height_percent_for_pointer(pointer.y, work_area),
-        ResizeEdge::Left | ResizeEdge::Right => current.height_percent,
+        ResizeEdge::Left | ResizeEdge::Right | ResizeEdge::Bottom => current.height_percent,
     };
     ResizedWindow { width_percent: width_percent as u8, height_percent, position_percent: position_percent as u8 }
 }
@@ -328,5 +333,11 @@ mod tests {
             ResizedWindow { width_percent: 50, height_percent: 40, position_percent: 0 },
         );
         assert_eq!((resized.width_percent, resized.position_percent), (75, 0));
+    }
+
+    #[test]
+    fn given_a_bottom_edge_drag_when_resizing_then_only_the_height_changes() {
+        let resized = resize_by_dragging(ResizeEdge::Bottom, Point { x: 5, y: 600 }, SCREEN, CENTERED_HALF);
+        assert_eq!((resized.width_percent, resized.position_percent, resized.height_percent), (50, 50, 75));
     }
 }

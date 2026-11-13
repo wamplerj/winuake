@@ -21,6 +21,7 @@ thread_local! {
 pub const GRIP_MARKUP: &str = r##"
   <Border x:Name="LeftGrip" Grid.RowSpan="3" Width="6" HorizontalAlignment="Left" VerticalAlignment="Stretch" Background="#01000000"/>
   <Border x:Name="RightGrip" Grid.RowSpan="3" Width="6" HorizontalAlignment="Right" VerticalAlignment="Stretch" Background="#01000000"/>
+  <Border x:Name="BottomGrip" Grid.RowSpan="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Background="#01000000"/>
   <Border x:Name="BottomLeftGrip" Grid.RowSpan="3" Width="10" Height="10" HorizontalAlignment="Left" VerticalAlignment="Bottom" Background="#01000000"/>
   <Border x:Name="BottomRightGrip" Grid.RowSpan="3" Width="10" Height="10" HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="#01000000"/>"##;
 
@@ -28,6 +29,7 @@ pub fn connect(root: &FrameworkElement) -> Result<()> {
     for (name, edge, shape) in [
         ("LeftGrip", ResizeEdge::Left, InputSystemCursorShape::SizeWestEast),
         ("RightGrip", ResizeEdge::Right, InputSystemCursorShape::SizeWestEast),
+        ("BottomGrip", ResizeEdge::Bottom, InputSystemCursorShape::SizeNorthSouth),
         ("BottomLeftGrip", ResizeEdge::BottomLeft, InputSystemCursorShape::SizeNortheastSouthwest),
         ("BottomRightGrip", ResizeEdge::BottomRight, InputSystemCursorShape::SizeNorthwestSoutheast),
     ] {

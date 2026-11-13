@@ -273,7 +273,8 @@ impl SettingsWindow {
         let ui: UIElement = text_box.cast()?;
         let source = text_box.clone();
         std::mem::forget(ui.GotFocus(move |_, _| crate::terminal_view::suspend_text_routing())?);
-        std::mem::forget(ui.KeyDown(move |_, args| {
+        // Preview (tunneling) so the text box's own handling of Delete and Backspace does not swallow the key first.
+        std::mem::forget(ui.PreviewKeyDown(move |_, args| {
             crate::terminal_view::suspend_text_routing();
             let Some(args) = args.as_ref() else { return };
             let Ok(key) = args.Key() else { return };
@@ -486,6 +487,48 @@ fn pick_file(title: &str, filter: &str) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
 }
 
+/// A font chosen in the font dialog.
+struct ChosenFont {
+    family: String,
+    size_points: i32,
+}
+
+/// Shows the Windows font dialog with fixed-width screen fonts, starting at `family` and `size_points`.
+fn pick_font(family: &str, size_points: i32) -> Option<ChosenFont> {
+    use crate::window_bindings::{
+        CF_FIXEDPITCHONLY, CF_INITTOLOGFONTSTRUCT, CF_LIMITSIZE, CF_NOSCRIPTSEL, CF_SCREENFONTS, CHOOSEFONTW,
+        ChooseFontW, GetDC, GetDeviceCaps, LOGFONTW, LOGPIXELSY, ReleaseDC,
+    };
+    // The dialog converts the height to points with the screen device context's resolution, so use the same one.
+    let dots_per_inch = unsafe {
+        let screen = GetDC(None);
+        let dots = GetDeviceCaps(Some(screen), LOGPIXELSY);
+        ReleaseDC(None, screen);
+        if dots > 0 { dots } else { 96 }
+    };
+    let mut log_font =
+        LOGFONTW { lfHeight: -(size_points * dots_per_inch / 72), lfWeight: 400, lfCharSet: 1, ..LOGFONTW::default() };
+    for (slot, unit) in log_font.lfFaceName.iter_mut().zip(family.encode_utf16().take(31)) {
+        *slot = unit;
+    }
+    let mut dialog = CHOOSEFONTW {
+        lStructSize: size_of::<CHOOSEFONTW>() as u32,
+        hwndOwner: HWND(crate::workspace_host::window_handle() as *mut core::ffi::c_void),
+        lpLogFont: &mut log_font,
+        iPointSize: size_points * 10,
+        Flags: (CF_SCREENFONTS | CF_FIXEDPITCHONLY | CF_INITTOLOGFONTSTRUCT | CF_NOSCRIPTSEL | CF_LIMITSIZE) as u32,
+        nSizeMin: 6,
+        nSizeMax: 72,
+        ..CHOOSEFONTW::default()
+    };
+    if !unsafe { ChooseFontW(&mut dialog) }.as_bool() {
+        return None;
+    }
+    let length = log_font.lfFaceName.iter().position(|unit| *unit == 0).unwrap_or(log_font.lfFaceName.len());
+    let family = String::from_utf16_lossy(&log_font.lfFaceName[..length]);
+    (!family.is_empty()).then(|| ChosenFont { family, size_points: ((dialog.iPointSize + 5) / 10).clamp(6, 72) })
+}
+
 /// Shows the Windows folder picker.
 fn pick_folder(title: &str) -> Option<std::path::PathBuf> {
     use crate::window_bindings::{
@@ -550,10 +593,12 @@ fn profile_field_markup(descriptor: &FieldDescriptor, settings: &Settings, profi
                 FieldValue::Text(text) => text,
                 FieldValue::Bool(flag) => flag.to_string(),
             };
-            let browse = if matches!(kind, FieldKind::FilePath | FieldKind::FolderPath) {
-                r#"<Button x:Name="Browse" Content="Browse..." Margin="8,0,0,0"/>"#
-            } else {
-                ""
+            let browse = match kind {
+                FieldKind::FilePath | FieldKind::FolderPath => {
+                    r#"<Button x:Name="Browse" Content="Browse..." Margin="8,0,0,0"/>"#
+                }
+                FieldKind::FontFamily => r#"<Button x:Name="Browse" Content="Choose font..." Margin="8,0,0,0"/>"#,
+                _ => "",
             };
             format!(
                 r#"<StackPanel xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}" Margin="0,10,0,0"><TextBlock Text="{label}" Foreground="{DIM}" FontSize="12"/><StackPanel Orientation="Horizontal"><TextBox x:Name="Field" Text="{}" MinWidth="320" HorizontalAlignment="Left"/>{browse}</StackPanel></StackPanel>"#,
@@ -645,12 +690,30 @@ fn connect_profile_field(row: &FrameworkElement, descriptor: &FieldDescriptor, p
                     restore_profile_field(&source, &profile, key);
                 }
             })?);
-            if matches!(kind, FieldKind::FilePath | FieldKind::FolderPath) {
+            if matches!(kind, FieldKind::FilePath | FieldKind::FolderPath | FieldKind::FontFamily) {
                 connect_browse_button(row, kind, key, &profile)?;
             }
         }
     }
     Ok(())
+}
+
+/// Opens the Windows font dialog (fixed-width fonts only, since a terminal needs them) and saves the chosen family and size.
+fn choose_profile_font(profile: &str) {
+    let current = fields::read_profile_field(&settings_store::current(), profile, "profile.font_family");
+    let current_size = fields::read_profile_field(&settings_store::current(), profile, "profile.font_size_points");
+    let family = match current {
+        Some(FieldValue::Text(text)) => text,
+        _ => String::new(),
+    };
+    let size = match current_size {
+        Some(FieldValue::Number(number)) => number as i32,
+        _ => 11,
+    };
+    let Some(choice) = pick_font(&family, size) else { return };
+    commit_profile(profile, "profile.font_family", FieldValue::Text(choice.family));
+    commit_profile(profile, "profile.font_size_points", FieldValue::Number(i64::from(choice.size_points)));
+    refresh_profile_page();
 }
 
 /// The Browse... button of a path field: asks for a file or folder, shows it in the text box, and saves it.
@@ -659,6 +722,10 @@ fn connect_browse_button(row: &FrameworkElement, kind: FieldKind, key: &'static 
     let text_box: TextBox = find(row, "Field")?;
     let profile = profile.to_owned();
     std::mem::forget(browse.Click(move |_, _| {
+        if kind == FieldKind::FontFamily {
+            choose_profile_font(&profile);
+            return;
+        }
         let picked = match kind {
             FieldKind::FolderPath => pick_folder("Choose the starting directory"),
             _ => pick_file("Choose the program to run", "Programs\0*.exe;*.cmd;*.bat;*.com\0All files\0*.*\0\0"),

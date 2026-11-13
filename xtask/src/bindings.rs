@@ -28,7 +28,7 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.SizeChangedEventHandler",
     "Microsoft.UI.Xaml.SizeChangedEventArgs::get_NewSize",
     "Microsoft.UI.Xaml.Controls.SwapChainPanel::{get_CompositionScaleX, get_CompositionScaleY, add_CompositionScaleChanged}",
-    "Microsoft.UI.Xaml.UIElement::{add_KeyDown, Focus, add_PointerPressed, add_PointerMoved, add_PointerReleased, add_PointerWheelChanged, CapturePointer, ReleasePointerCapture}",
+    "Microsoft.UI.Xaml.UIElement::{add_KeyDown, add_PreviewKeyDown, Focus, add_PointerPressed, add_PointerMoved, add_PointerReleased, add_PointerWheelChanged, CapturePointer, ReleasePointerCapture}",
     "Microsoft.UI.Xaml.Input.PointerEventHandler",
     "Microsoft.UI.Xaml.Input.PointerRoutedEventArgs::{get_Pointer, GetCurrentPoint, put_Handled}",
     "Microsoft.UI.Input.IPointerPointStatics",
@@ -206,6 +206,18 @@ const RENDER_FILTERS: &[&str] = &[
 
 /// Win32 window management used by the drop-down host in `winuake`.
 const WINDOW_FILTERS: &[&str] = &[
+    "GetDC",
+    "ReleaseDC",
+    "GetDeviceCaps",
+    "LOGPIXELSY",
+    "ChooseFontW",
+    "CHOOSEFONTW",
+    "LOGFONTW",
+    "CF_SCREENFONTS",
+    "CF_FIXEDPITCHONLY",
+    "CF_INITTOLOGFONTSTRUCT",
+    "CF_NOSCRIPTSEL",
+    "CF_LIMITSIZE",
     "SHBrowseForFolderW",
     "BROWSEINFOW",
     "SHGetPathFromIDListW",

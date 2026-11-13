@@ -26,6 +26,7 @@ pub enum ChordKey {
     ParenLeft,
     ParenRight,
     Asterisk,
+    Comma,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,6 +67,7 @@ const VK_DIGIT_9: i32 = 0x39;
 const VK_LETTER_A: i32 = 0x41;
 const VK_LETTER_Z: i32 = 0x5A;
 const VK_NUMPAD_MULTIPLY: i32 = 0x6A;
+const VK_OEM_COMMA: i32 = 0xBC;
 const VK_F1: i32 = 0x70;
 const VK_F24: i32 = 0x87;
 
@@ -84,6 +86,7 @@ impl Chord {
             VK_UP => ChordKey::Up,
             VK_DOWN => ChordKey::Down,
             VK_NUMPAD_MULTIPLY => ChordKey::Asterisk,
+            VK_OEM_COMMA => ChordKey::Comma,
             VK_LETTER_A..=VK_LETTER_Z => ChordKey::Letter(char::from(virtual_key as u8)),
             VK_DIGIT_0..=VK_DIGIT_9 => ChordKey::Digit((virtual_key - VK_DIGIT_0) as u8),
             VK_F1..=VK_F24 => ChordKey::Function((virtual_key - VK_F1 + 1) as u8),
@@ -112,6 +115,7 @@ impl Chord {
             ChordKey::ParenLeft => (VK_DIGIT_0 + 9, true),
             ChordKey::ParenRight => (VK_DIGIT_0, true),
             ChordKey::Asterisk => (VK_DIGIT_0 + 8, true),
+            ChordKey::Comma => (VK_OEM_COMMA, false),
         };
         HotkeySpec {
             control: self.modifiers.control,
@@ -151,6 +155,7 @@ impl Chord {
             "(" => return Some(ChordKey::ParenLeft),
             ")" => return Some(ChordKey::ParenRight),
             "*" => return Some(ChordKey::Asterisk),
+            "," => return Some(ChordKey::Comma),
             _ => {}
         }
         if let Some(number) = lower.strip_prefix('f').and_then(|digits| digits.parse::<u8>().ok()) {
@@ -189,6 +194,7 @@ impl fmt::Display for Chord {
             ChordKey::ParenLeft => formatter.write_str("("),
             ChordKey::ParenRight => formatter.write_str(")"),
             ChordKey::Asterisk => formatter.write_str("*"),
+            ChordKey::Comma => formatter.write_str(","),
         }
     }
 }
@@ -211,6 +217,7 @@ mod tests {
         assert_eq!(Chord::parse("Ctrl+("), Ok(Chord::new(true, false, false, ChordKey::ParenLeft)));
         assert_eq!(Chord::parse("Ctrl+)"), Ok(Chord::new(true, false, false, ChordKey::ParenRight)));
         assert_eq!(Chord::parse("Ctrl+*"), Ok(Chord::new(true, false, false, ChordKey::Asterisk)));
+        assert_eq!(Chord::parse("Ctrl+Shift+,"), Ok(Chord::new(true, true, false, ChordKey::Comma)));
     }
 
     #[test]
@@ -223,8 +230,17 @@ mod tests {
 
     #[test]
     fn given_any_chord_when_displayed_then_parsing_it_back_gives_the_same_chord() {
-        for text in ["Ctrl+Shift+F11", "Alt+Shift+Down", "Ctrl+Alt+Left", "Shift+Up", "Ctrl+(", "Ctrl+*", "Alt+0", "F1"]
-        {
+        for text in [
+            "Ctrl+Shift+F11",
+            "Alt+Shift+Down",
+            "Ctrl+Alt+Left",
+            "Shift+Up",
+            "Ctrl+(",
+            "Ctrl+*",
+            "Alt+0",
+            "F1",
+            "Ctrl+Shift+,",
+        ] {
             let chord = Chord::parse(text).expect(text);
             assert_eq!(chord.to_string(), text);
         }
@@ -246,6 +262,14 @@ mod tests {
         assert_eq!(Chord::from_virtual_key(0x26, CTRL), Some(Chord::new(true, false, false, ChordKey::Up)));
         assert_eq!(Chord::from_virtual_key(0x27, CTRL), Some(Chord::new(true, false, false, ChordKey::Right)));
         assert_eq!(Chord::from_virtual_key(0x28, CTRL), Some(Chord::new(true, false, false, ChordKey::Down)));
+    }
+
+    #[test]
+    fn given_the_comma_key_when_converting_then_shift_stays_a_modifier_and_the_hotkey_uses_the_oem_comma_code() {
+        let chord = Chord::from_virtual_key(0xBC, CTRL_SHIFT).expect("comma");
+        assert_eq!(chord, Chord::new(true, true, false, ChordKey::Comma));
+        let hotkey = chord.hotkey();
+        assert_eq!((hotkey.virtual_key, hotkey.control, hotkey.shift, hotkey.alt), (0xBC, true, true, false));
     }
 
     #[test]

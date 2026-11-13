@@ -41,6 +41,8 @@ pub enum FieldKind {
     FilePath,
     /// Path of a folder, picked with a folder dialog.
     FolderPath,
+    /// Name of an installed font, picked with the font dialog (a text box too).
+    FontFamily,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -155,7 +157,7 @@ pub fn descriptors() -> Vec<FieldDescriptor> {
             "Starting directory (empty uses your user folder)",
             FieldKind::FolderPath,
         ),
-        field(Profile, "profile.font_family", "Font", Text),
+        field(Profile, "profile.font_family", "Font", FieldKind::FontFamily),
         field(Profile, "profile.font_size_points", "Font size (points)", FieldKind::Number { minimum: 6, maximum: 72 }),
         field(Profile, "profile.color_scheme", "Color scheme", Text),
         field(
@@ -350,7 +352,10 @@ fn validate(descriptor: &FieldDescriptor, value: FieldValue) -> Result<FieldValu
     let key = descriptor.key;
     match (descriptor.kind, &value) {
         (FieldKind::Toggle, FieldValue::Bool(_))
-        | (FieldKind::Text | FieldKind::FilePath | FieldKind::FolderPath, FieldValue::Text(_)) => Ok(value),
+        | (
+            FieldKind::Text | FieldKind::FilePath | FieldKind::FolderPath | FieldKind::FontFamily,
+            FieldValue::Text(_),
+        ) => Ok(value),
         (FieldKind::Number { minimum, maximum }, FieldValue::Number(number)) => {
             if (minimum..=maximum).contains(number) {
                 Ok(value)
@@ -444,7 +449,8 @@ mod tests {
                 | FieldKind::Color
                 | FieldKind::Choice(_)
                 | FieldKind::FilePath
-                | FieldKind::FolderPath => {
+                | FieldKind::FolderPath
+                | FieldKind::FontFamily => {
                     matches!(value, FieldValue::Text(_))
                 }
             };

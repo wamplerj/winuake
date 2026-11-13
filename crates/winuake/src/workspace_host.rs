@@ -399,6 +399,7 @@ impl WorkspaceHost {
             Action::ToggleWindowState => crate::drop_down::toggle(),
             Action::KeepOpen => self.chrome.toggle_keep_open(),
             Action::ManageProfiles | Action::EditProfile => open_settings(crate::settings_window::PROFILE_PAGE),
+            Action::OpenSettings => open_settings(crate::settings_window::WINDOW_PAGE),
             Action::IncreaseWindowWidth => {
                 crate::drop_down::dispatch(DropDownEvent::AdjustWidth(PercentStep::Increase))
             }

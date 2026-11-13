@@ -12,6 +12,8 @@ pub enum Action {
     KeepOpen,
     ManageProfiles,
     EditProfile,
+    /// Winuake addition (Yakuake opens its settings from the menu or the standard preferences shortcut).
+    OpenSettings,
     IncreaseWindowWidth,
     DecreaseWindowWidth,
     IncreaseWindowHeight,
@@ -46,13 +48,14 @@ pub enum Action {
 }
 
 /// Name and default shortcut text of each fixed action, in Yakuake's registration order.
-const FIXED_ACTIONS: [(Action, &str, Option<&str>); 35] = [
+const FIXED_ACTIONS: [(Action, &str, Option<&str>); 36] = [
     (Action::ViewFullScreen, "view-full-screen", Some("Ctrl+Shift+F11")),
     (Action::Quit, "file_quit", Some("Ctrl+Shift+Q")),
     (Action::ToggleWindowState, "toggle-window-state", Some("F12")),
     (Action::KeepOpen, "keep-open", None),
     (Action::ManageProfiles, "manage-profiles", None),
     (Action::EditProfile, "edit-profile", None),
+    (Action::OpenSettings, "open-settings", Some("Ctrl+Shift+,")),
     (Action::IncreaseWindowWidth, "increase-window-width", Some("Alt+Shift+Right")),
     (Action::DecreaseWindowWidth, "decrease-window-width", Some("Alt+Shift+Left")),
     (Action::IncreaseWindowHeight, "increase-window-height", Some("Alt+Shift+Down")),
@@ -87,7 +90,7 @@ const FIXED_ACTIONS: [(Action, &str, Option<&str>); 35] = [
 const SWITCH_PREFIX: &str = "switch-to-session-";
 
 impl Action {
-    /// All 45 actions: the 35 fixed ones and `switch-to-session-1..10`.
+    /// All 46 actions: the 36 fixed ones and `switch-to-session-1..10`.
     pub fn all() -> Vec<Action> {
         FIXED_ACTIONS.iter().map(|(action, _, _)| *action).chain((1..=10).map(Action::SwitchToSession)).collect()
     }
@@ -192,13 +195,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn given_the_action_table_when_listing_all_then_there_are_45_with_unique_names() {
+    fn given_the_action_table_when_listing_all_then_there_are_46_with_unique_names() {
         let actions = Action::all();
-        assert_eq!(actions.len(), 45);
+        assert_eq!(actions.len(), 46);
         let mut names: Vec<String> = actions.iter().map(|action| action.name()).collect();
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 45);
+        assert_eq!(names.len(), 46);
     }
 
     #[test]
@@ -302,5 +305,20 @@ mod tests {
         let overrides = BTreeMap::from([("close-session".to_owned(), "Ctrl+Shift+T".to_owned())]);
         let map = ShortcutMap::with_overrides(&overrides).map;
         assert_eq!(map.lookup(Chord::parse("Ctrl+Shift+T").unwrap()), Some(Action::CloseSession));
+    }
+
+    #[test]
+    fn given_the_default_shortcuts_when_looking_up_ctrl_shift_comma_then_it_opens_settings() {
+        let chord = Chord::parse("Ctrl+Shift+,").unwrap();
+        assert_eq!(ShortcutMap::with_defaults().lookup(chord), Some(Action::OpenSettings));
+        assert_eq!(Action::from_name("open-settings"), Some(Action::OpenSettings));
+    }
+
+    #[test]
+    fn given_an_override_when_rebinding_open_settings_then_the_new_chord_works_and_the_old_one_is_free() {
+        let overrides = BTreeMap::from([("open-settings".to_owned(), "Ctrl+Alt+P".to_owned())]);
+        let map = ShortcutMap::with_overrides(&overrides).map;
+        assert_eq!(map.lookup(Chord::parse("Ctrl+Alt+P").unwrap()), Some(Action::OpenSettings));
+        assert_eq!(map.lookup(Chord::parse("Ctrl+Shift+,").unwrap()), None);
     }
 }

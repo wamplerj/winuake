@@ -57,6 +57,7 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `increase-window-height` | done | 3 | Alt+Shift+Down |
 | `increase-window-width` | done | 3 | Alt+Shift+Right |
 | `keep-open` | done | 4 | Title bar pin and menu; saved |
+| `open-settings` | added | 10 | Winuake addition: Ctrl+Shift+, opens the settings tab; rebindable on the Shortcuts page |
 | `manage-profiles` | done | 10 | Opens the settings tab on the Profile page: add, duplicate, delete, default, add detected shells (Windows PowerShell, PowerShell 7, Command Prompt, Git Bash, WSL) |
 | `move-session-left` | done | 4 | Ctrl+Shift+Left, tab menu |
 | `move-session-right` | done | 4 | Ctrl+Shift+Right, tab menu |
