@@ -8,4 +8,4 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-winuake-config = { version = "0.1.0", path = "../winuake-config" }
+winuake-config = { path = "../winuake-config" }

@@ -10,7 +10,7 @@ workspace = true
 [dependencies]
 winuake-core = { path = "../winuake-core" }
 winuake-config = { path = "../winuake-config" }
-winuake-term = { version = "0.1.0", path = "../winuake-term" }
+winuake-term = { path = "../winuake-term" }
 winuake-skin = { path = "../winuake-skin" }
 winuake-ipc = { path = "../winuake-ipc" }
 serde_json = "1"
