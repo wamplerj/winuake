@@ -149,7 +149,7 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `[Tabs]` prevent_closing_image and its x, y | done | 6 | Drawn on locked tabs |
 | `[Tabs]` compact | partial | 6 | Positions are adjusted as in `skin.cpp`; the tab bar is not inset to the compact left/right (no bundled skin uses it) |
 | `[Background]` back_image, left_corner, right_corner (tabs) | done | 6 | |
-| `[PlusButton]` x, y, images, at_end_of_tabs | done | 6 | |
+| `[PlusButton]` x, y, images, at_end_of_tabs | done | 6 | Click starts a session; right click or press and hold (about 450 ms) opens the profile menu (Winuake addition; Yakuake only has the right-click menu) |
 | `[MinusButton]` x, y, images | done | 6 | Closes the selected tab |
 | SVG images (default skin) | done | 6 | Rendered at 3x into `%LOCALAPPDATA%\Winuake\skin-cache` |
 | Window masks for rounded skin corners | n/a | 6 | Not ported; corner images are drawn over the window background |

@@ -275,15 +275,15 @@ impl SkinButtonViews {
         prefix: &str,
         on_click: impl Fn() + Send + 'static,
     ) -> Result<Option<Rc<Self>>> {
-        Self::connect_with_right_click(root, prefix, on_click, None)
+        Self::connect_with_menu(root, prefix, on_click, None)
     }
 
-    /// Like `connect`, and a right click runs `on_right_click` (the plus button's profile menu) instead of counting as a click.
-    pub fn connect_with_right_click(
+    /// Like `connect`, and with `on_menu` (the plus button's profile menu) the button also opens it on a right click or when held down.
+    pub fn connect_with_menu(
         root: &FrameworkElement,
         prefix: &str,
         on_click: impl Fn() + Send + 'static,
-        on_right_click: Option<Box<dyn Fn() + Send>>,
+        on_menu: Option<Box<dyn Fn() + Send>>,
     ) -> Result<Option<Rc<Self>>> {
         let find = |name: String| -> Result<UIElement> { root.FindName(&HSTRING::from(name))?.cast() };
         let Ok(hit): Result<UIElement> = find(format!("{prefix}Button")) else { return Ok(None) };
@@ -310,35 +310,56 @@ impl SkinButtonViews {
                 views.refresh();
             });
         })?);
-        let pressed_target = hit.clone();
-        std::mem::forget(hit.PointerPressed(move |_, args| {
-            if let Some(args) = args.as_ref() {
-                let _ = args.SetHandled(true);
-                if is_right_button(args, &pressed_target) {
-                    if let Some(on_right_click) = &on_right_click {
-                        on_right_click();
+        match on_menu {
+            Some(on_menu) => {
+                // Click, hold and right click go through the shared gesture; the handlers here only draw the pressed look.
+                let on_menu: Rc<dyn Fn()> = Rc::from(on_menu as Box<dyn Fn()>);
+                crate::hold_button::attach(&hit, on_click, move || {
+                    // The menu takes the pointer, so the button would otherwise stay drawn as pressed.
+                    with_views(index, |views| {
+                        views.pressed.set(false);
+                        views.refresh();
+                    });
+                    on_menu();
+                })?;
+                std::mem::forget(hit.PointerPressed(move |_, _| {
+                    with_views(index, |views| {
+                        views.pressed.set(true);
+                        views.refresh();
+                    });
+                })?);
+                std::mem::forget(hit.PointerReleased(move |_, _| {
+                    with_views(index, |views| {
+                        views.pressed.set(false);
+                        views.refresh();
+                    });
+                })?);
+            }
+            None => {
+                std::mem::forget(hit.PointerPressed(move |_, args| {
+                    if let Some(args) = args.as_ref() {
+                        let _ = args.SetHandled(true);
                     }
-                    return;
-                }
+                    with_views(index, |views| {
+                        views.pressed.set(true);
+                        views.refresh();
+                    });
+                })?);
+                std::mem::forget(hit.PointerReleased(move |_, args| {
+                    if let Some(args) = args.as_ref() {
+                        let _ = args.SetHandled(true);
+                    }
+                    let clicked = with_views(index, |views| {
+                        let clicked = views.pressed.replace(false) && views.inside.get();
+                        views.refresh();
+                        clicked
+                    });
+                    if clicked == Some(true) {
+                        on_click();
+                    }
+                })?);
             }
-            with_views(index, |views| {
-                views.pressed.set(true);
-                views.refresh();
-            });
-        })?);
-        std::mem::forget(hit.PointerReleased(move |_, args| {
-            if let Some(args) = args.as_ref() {
-                let _ = args.SetHandled(true);
-            }
-            let clicked = with_views(index, |views| {
-                let clicked = views.pressed.replace(false) && views.inside.get();
-                views.refresh();
-                clicked
-            });
-            if clicked == Some(true) {
-                on_click();
-            }
-        })?);
+        }
         views.refresh();
         Ok(Some(views))
     }
@@ -390,5 +411,6 @@ fn with_views<T>(index: usize, action: impl FnOnce(&SkinButtonViews) -> T) -> Op
 
 /// Drops registered buttons from a bar that was replaced. (Handlers on the old elements die with them.)
 pub fn clear_registry() {
+    crate::hold_button::clear_registry();
     REGISTRY.with(|registry| registry.borrow_mut().clear());
 }

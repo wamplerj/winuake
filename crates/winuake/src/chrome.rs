@@ -220,7 +220,7 @@ impl Chrome {
                     SkinButtonViews::connect(&title_element, "Focus", || workspace_host::run_action(Action::KeepOpen))?;
                 SkinButtonViews::connect(&title_element, "Config", show_main_menu)?;
                 SkinButtonViews::connect(&title_element, "Quit", workspace_host::request_quit)?;
-                SkinButtonViews::connect_with_right_click(
+                SkinButtonViews::connect_with_menu(
                     &tab_element,
                     "Plus",
                     || workspace_host::run_action(Action::NewSession),
@@ -238,22 +238,18 @@ impl Chrome {
                     r#"<TextBlock xmlns="{XAML_NAMESPACE}" Text="&#xE710;" FontFamily="{ICON_FONT}" FontSize="12" Foreground="{COLOR_TEXT_DIM}" VerticalAlignment="Center" Padding="10,0,10,0"/>"#
                 ))?
                 .cast()?;
-                press(&new_tab.cast()?, || workspace_host::run_action(Action::NewSession))?;
                 let plain_plus: UIElement = new_tab.cast()?;
-                let plain_target = plain_plus.clone();
-                std::mem::forget(plain_plus.PointerPressed(move |_, args| {
-                    if let Some(args) = args.as_ref()
-                        && skin_chrome::is_right_button(args, &plain_target)
-                    {
-                        show_profile_menu();
-                    }
-                })?);
+                crate::hold_button::attach(
+                    &plain_plus,
+                    || workspace_host::run_action(Action::NewSession),
+                    show_profile_menu,
+                )?;
                 tabs.plain_new_tab = Some(new_tab);
             }
         }
         if let Some(skin) = skin.as_ref().filter(|skin| skin.skin.tab_bar.plus_button_at_end_of_tabs) {
             let inline = load(&skin_chrome::plus_button_inline_markup(skin))?;
-            SkinButtonViews::connect_with_right_click(
+            SkinButtonViews::connect_with_menu(
                 &inline,
                 "Plus",
                 || workspace_host::run_action(Action::NewSession),

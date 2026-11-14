@@ -32,6 +32,8 @@ mod first_run;
 #[cfg(windows)]
 mod flashes;
 #[cfg(windows)]
+mod hold_button;
+#[cfg(windows)]
 mod message_hook;
 #[cfg(windows)]
 mod resize_grips;

@@ -6,5 +6,6 @@ pub mod diagnostics;
 pub mod drop_down;
 pub mod ids;
 pub mod notifications;
+pub mod press_and_hold;
 pub mod sessions;
 pub mod shortcut;
