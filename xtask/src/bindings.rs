@@ -107,6 +107,17 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.IUIElementStatics",
     "Microsoft.UI.Xaml.IWindowStatics",
     "Microsoft.UI.Xaml.Controls.IXamlControlsResourcesStatics",
+    // Dropdown for fields with a fixed set of choices.
+    "Microsoft.UI.Xaml.Controls.Primitives.Selector::{get_SelectedIndex, put_SelectedIndex, add_SelectionChanged}",
+    "Microsoft.UI.Xaml.Controls.SelectionChangedEventHandler",
+    "Microsoft.UI.Xaml.Controls.ComboBox::CreateInstance",
+    "Microsoft.UI.Xaml.Controls.Primitives.ISelectorFactory",
+    "Microsoft.UI.Xaml.Controls.Primitives.ISelectorStatics",
+    "Microsoft.UI.Xaml.Controls.IComboBoxFactory",
+    "Microsoft.UI.Xaml.Controls.IComboBoxStatics",
+    "Microsoft.UI.Xaml.Controls.IItemsControlFactory",
+    "Microsoft.UI.Xaml.Controls.IItemsControlStatics",
+    "Microsoft.UI.Xaml.Controls.ISelectionChangedEventArgsFactory",
 ];
 
 /// Win32 APIs used by the ConPTY backend in `winuake-term`.

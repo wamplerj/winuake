@@ -5,7 +5,7 @@
 //! boxes record the key combination pressed in them.
 
 use crate::bindings::{
-    Button, FrameworkElement, Panel, TextBlock, TextBox, ToggleButton, UIElement, Visibility, XamlReader,
+    Button, FrameworkElement, Panel, Selector, TextBlock, TextBox, ToggleButton, UIElement, Visibility, XamlReader,
 };
 use crate::settings_store;
 use crate::window_bindings::HWND;
@@ -59,6 +59,16 @@ fn action_label(action: Action) -> String {
     characters.next().map(|first| first.to_uppercase().collect::<String>() + characters.as_str()).unwrap_or(name)
 }
 
+/// A dropdown listing `choices` with `current` selected; `extra` holds the namespace declarations a standalone row needs.
+fn choice_markup(label: &str, name: &str, extra: &str, choices: &[&str], current: &str) -> String {
+    let selected = choices.iter().position(|choice| *choice == current).unwrap_or(0);
+    let items: String =
+        choices.iter().map(|choice| format!(r#"<ComboBoxItem Content="{}"/>"#, escape(choice))).collect();
+    format!(
+        r#"<StackPanel{extra} Margin="0,10,0,0"><TextBlock Text="{label}" Foreground="{DIM}" FontSize="12"/><ComboBox x:Name="{name}" SelectedIndex="{selected}" MinWidth="200">{items}</ComboBox></StackPanel>"#
+    )
+}
+
 fn field_markup(descriptor: &FieldDescriptor, settings: &Settings) -> String {
     let name = control_name("F", descriptor.key);
     let label = escape(descriptor.label);
@@ -67,6 +77,9 @@ fn field_markup(descriptor: &FieldDescriptor, settings: &Settings) -> String {
         (FieldKind::Toggle, Some(FieldValue::Bool(checked))) => format!(
             r#"<CheckBox x:Name="{name}" Content="{label}" IsChecked="{checked}" Foreground="{TEXT}" Margin="0,6,0,0"/>"#
         ),
+        (FieldKind::Choice(choices), Some(FieldValue::Text(current))) => {
+            choice_markup(&label, &name, "", choices, &current)
+        }
         (_, Some(value)) => {
             let text = match value {
                 FieldValue::Number(number) => number.to_string(),
@@ -239,6 +252,15 @@ impl SettingsWindow {
                 std::mem::forget(check_box.Click(move |_, _| {
                     let checked = source.IsChecked().unwrap_or(false);
                     commit(key, FieldValue::Bool(checked));
+                })?);
+            }
+            FieldKind::Choice(choices) => {
+                let drop_down: Selector = find(&self.root, &name)?;
+                let source = drop_down.clone();
+                std::mem::forget(drop_down.SelectionChanged(move |_, _| {
+                    if let Some(choice) = selected_choice(&source, choices) {
+                        commit(key, FieldValue::Text(choice));
+                    }
                 })?);
             }
             kind => {
@@ -587,6 +609,10 @@ fn profile_field_markup(descriptor: &FieldDescriptor, settings: &Settings, profi
         (FieldKind::Toggle, FieldValue::Bool(checked)) => format!(
             r#"<CheckBox xmlns="{XAML_NAMESPACE}" x:Name="Field" xmlns:x="{XAML_X_NAMESPACE}" Content="{label}" IsChecked="{checked}" Foreground="{TEXT}" Margin="0,6,0,0"/>"#
         ),
+        (FieldKind::Choice(choices), FieldValue::Text(current)) => {
+            let namespaces = format!(r#" xmlns="{XAML_NAMESPACE}" xmlns:x="{XAML_X_NAMESPACE}""#);
+            choice_markup(&label, "Field", &namespaces, choices, &current)
+        }
         (kind, value) => {
             let text = match value {
                 FieldValue::Number(number) => number.to_string(),
@@ -655,6 +681,12 @@ fn refresh_profile_page() {
     }
 }
 
+/// The choice currently picked in a dropdown, if any.
+fn selected_choice(drop_down: &Selector, choices: &[&str]) -> Option<String> {
+    let index = usize::try_from(drop_down.SelectedIndex().ok()?).ok()?;
+    choices.get(index).map(|choice| (*choice).to_owned())
+}
+
 fn connect_profile_field(row: &FrameworkElement, descriptor: &FieldDescriptor, profile: &str) -> Result<()> {
     let key = descriptor.key;
     let profile = profile.to_owned();
@@ -664,6 +696,15 @@ fn connect_profile_field(row: &FrameworkElement, descriptor: &FieldDescriptor, p
             let source = check_box.clone();
             std::mem::forget(check_box.Click(move |_, _| {
                 commit_profile(&profile, key, FieldValue::Bool(source.IsChecked().unwrap_or(false)));
+            })?);
+        }
+        FieldKind::Choice(choices) => {
+            let drop_down: Selector = find(row, "Field")?;
+            let source = drop_down.clone();
+            std::mem::forget(drop_down.SelectionChanged(move |_, _| {
+                if let Some(choice) = selected_choice(&source, choices) {
+                    commit_profile(&profile, key, FieldValue::Text(choice));
+                }
             })?);
         }
         kind => {
