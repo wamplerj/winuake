@@ -154,6 +154,11 @@ impl TerminalView {
         self.mouse_tracking_allowed.set(allowed);
     }
 
+    /// The folder the shell last reported, if it ever did.
+    pub fn current_directory(&self) -> Option<winuake_term::working_directory::ReportedDirectory> {
+        self.session.with_emulator(|emulator| emulator.current_directory())
+    }
+
     pub fn has_selection(&self) -> bool {
         self.session.with_emulator(|emulator| emulator.has_selection())
     }

@@ -54,6 +54,17 @@ impl Profile {
         self.scrollback_lines = self.scrollback_lines.min(SCROLLBACK_LINES_MAX);
         self
     }
+
+    /// The WSL distribution this profile starts (`wsl.exe -d <name>`), for mapping the shell's Unix paths to Windows ones.
+    pub fn wsl_distribution(&self) -> Option<&str> {
+        let program = self.program.as_deref()?;
+        let file_name = program.rsplit(['\\', '/']).next()?;
+        if !file_name.eq_ignore_ascii_case("wsl.exe") && !file_name.eq_ignore_ascii_case("wsl") {
+            return None;
+        }
+        let position = self.arguments.iter().position(|argument| argument == "-d" || argument == "--distribution")?;
+        self.arguments.get(position + 1).map(String::as_str)
+    }
 }
 
 #[cfg(test)]
@@ -75,5 +86,27 @@ mod tests {
         assert_eq!(profile.font_size_points, 72.0);
         assert_eq!(profile.scrollback_lines, SCROLLBACK_LINES_MAX);
         assert_eq!(Profile { font_size_points: 1.0, ..Profile::default() }.clamped().font_size_points, 6.0);
+    }
+
+    fn wsl_profile(program: &str, arguments: &[&str]) -> Profile {
+        Profile {
+            program: Some(program.to_owned()),
+            arguments: arguments.iter().map(|argument| (*argument).to_owned()).collect(),
+            ..Profile::default()
+        }
+    }
+
+    #[test]
+    fn given_a_wsl_profile_when_asking_for_its_distribution_then_the_dash_d_name_is_returned() {
+        let profile = wsl_profile(r"C:\Windows\System32\wsl.exe", &["-d", "Ubuntu"]);
+        assert_eq!(profile.wsl_distribution(), Some("Ubuntu"));
+        assert_eq!(wsl_profile("wsl.exe", &["--distribution", "Debian"]).wsl_distribution(), Some("Debian"));
+    }
+
+    #[test]
+    fn given_a_profile_that_is_not_wsl_when_asking_for_its_distribution_then_there_is_none() {
+        assert_eq!(wsl_profile(r"C:\Program Files\Git\bin\bash.exe", &["-d", "x"]).wsl_distribution(), None);
+        assert_eq!(wsl_profile("wsl.exe", &[]).wsl_distribution(), None);
+        assert_eq!(Profile::default().wsl_distribution(), None);
     }
 }

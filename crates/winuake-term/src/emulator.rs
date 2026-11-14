@@ -4,6 +4,7 @@ use crate::input::{InputModes, MouseReporting};
 use crate::pty::TerminalSize;
 use crate::snapshot::CursorStyle;
 use crate::snapshot::{self, ScreenSnapshot};
+use crate::working_directory::{ReportedDirectory, WorkingDirectoryTracker};
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
@@ -120,6 +121,7 @@ pub struct TerminalEmulator {
     term: Term<EventForwarder>,
     processor: Processor,
     events: Receiver<Event>,
+    directory: WorkingDirectoryTracker,
 }
 
 impl TerminalEmulator {
@@ -132,7 +134,12 @@ impl TerminalEmulator {
         let (sender, events) = mpsc::channel();
         let config = config_for(scrollback_lines, default_cursor);
         let term = Term::new(config, &GridDimensions::from(size), EventForwarder { sender });
-        Self { term, processor: Processor::new(), events }
+        Self { term, processor: Processor::new(), events, directory: WorkingDirectoryTracker::default() }
+    }
+
+    /// The folder the shell last reported (OSC 7 or OSC 9;9), if it ever did.
+    pub fn current_directory(&self) -> Option<ReportedDirectory> {
+        self.directory.current().cloned()
     }
 
     /// Changes the profile-driven defaults of a running terminal (switching profile): how many lines of scrollback are kept (lines beyond a
@@ -154,6 +161,7 @@ impl TerminalEmulator {
 
     /// Feeds shell output through the VT parser and returns the host-visible events it produced.
     pub fn advance(&mut self, bytes: &[u8]) -> Vec<TerminalEvent> {
+        self.directory.feed(bytes);
         self.processor.advance(&mut self.term, bytes);
         self.events.try_iter().filter_map(Self::translate_event).collect()
     }
@@ -385,6 +393,17 @@ mod tests {
         terminal.advance(b"\x1b[4 q");
         terminal.apply_defaults(100, CursorStyle::Beam);
         assert_eq!(terminal.snapshot().cursor.map(|cursor| cursor.style), Some(CursorStyle::Underline));
+    }
+
+    #[test]
+    fn given_a_folder_report_when_advancing_then_the_emulator_remembers_it_and_shows_no_text() {
+        let mut terminal = emulator(30, 2);
+        terminal.advance(b"\x1b]9;9;C:\\work\x07$ ");
+        assert_eq!(
+            terminal.current_directory(),
+            Some(ReportedDirectory::Windows(std::path::PathBuf::from(r"C:\work")))
+        );
+        assert_eq!(terminal.row_text(0), "$");
     }
 
     #[test]

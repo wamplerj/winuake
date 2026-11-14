@@ -97,9 +97,11 @@ Right click on a terminal opens it. Middle click pastes. A program that asked fo
 | Edit Current Profile... | done | 11 | Opens the settings tab on the Profile page with this terminal's profile selected |
 | Close Session | done | 11 | Closes the clicked terminal |
 | Set Encoding | n/a | | ConPTY is always UTF-8 |
+| Terminal's current folder | partial | 11 | Windows cannot ask a console process where it is, so the shell must report it (OSC 7, or OSC 9;9 as Windows Terminal does; oh-my-posh and starship already do). Without a report the profile's starting folder is used, then the user folder. WSL shells map `/home/...` into `\\wsl.localhost\<distro>`; Git Bash's `/c/...` maps to `C:\...` |
 | Switch Profile | done | 11 | Applies the profile's font, size, colors, cursor and scrollback to the running terminal; the shell and screen stay; later splits use the new profile |
 | Scrollback: Clear Scrollback, Clear Scrollback and Reset, Adjust Scrollback... | done | 11 | Reset is a full terminal reset (RIS), so the prompt returns at the shell's next output; Adjust opens the Profile page |
-| Open File Manager, Open Folder With | planned | 11 | |
+| Open File Manager | done | 11 | File Explorer in the terminal's folder (see below for how the folder is known) |
+| Open Folder With | done | 11 | File Explorer, Visual Studio Code (when `code.cmd` is on the PATH), New Winuake Session Here (default profile), Copy Path |
 | Find... | planned | 11 | |
 
 ## Scripting API (D-Bus `Q_SCRIPTABLE`)

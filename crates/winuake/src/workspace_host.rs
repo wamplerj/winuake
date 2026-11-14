@@ -26,7 +26,7 @@ use winuake_core::sessions::workspace::{
     CloseOutcome, CloseQuestion, Confirmation, PaneGeometry, QuitCheck, Workspace, WorkspaceEffect, WorkspaceSettings,
 };
 use winuake_core::shortcut::{Chord, ChordModifiers};
-use winuake_core::terminal_menu::{ProfileEntry, TerminalMenuCommand, TerminalMenuState, terminal_menu};
+use winuake_core::terminal_menu::{FolderTarget, ProfileEntry, TerminalMenuCommand, TerminalMenuState, terminal_menu};
 use winuake_render::color::ColorScheme;
 use winuake_render::gpu::FontSpec;
 use winuake_render::scheme_catalog::{self, NamedScheme, find as find_scheme};
@@ -79,6 +79,8 @@ pub struct WorkspaceHost {
     terminal_profiles: RefCell<HashMap<TerminalId, String>>,
     /// Profile requested for the session being created ("new session with profile").
     pending_profile: RefCell<Option<String>>,
+    /// Folder the session being created starts in ("New Winuake Session Here").
+    pending_directory: RefCell<Option<std::path::PathBuf>>,
     settings_session: Cell<Option<SessionId>>,
     background: RefCell<winuake_render::gpu::BackgroundStyle>,
     schemes: RefCell<Vec<NamedScheme>>,
@@ -100,6 +102,7 @@ impl WorkspaceHost {
             default_profile: RefCell::new(settings.default_profile_name()),
             terminal_profiles: RefCell::new(HashMap::new()),
             pending_profile: RefCell::new(None),
+            pending_directory: RefCell::new(None),
             settings_session: Cell::new(None),
             background: RefCell::new(background_style(settings)),
             schemes: RefCell::new(load_schemes()),
@@ -178,6 +181,7 @@ impl WorkspaceHost {
                     self.start_terminal(*session, *terminal, None)?;
                 }
                 self.pending_profile.borrow_mut().take();
+                self.pending_directory.borrow_mut().take();
             }
             WorkspaceEffect::PageOpened { session } => {
                 let page = crate::settings_window::build_page()?;
@@ -236,7 +240,18 @@ impl WorkspaceHost {
         };
         let name = requested.unwrap_or_else(|| self.default_profile.borrow().clone());
         let profiles = self.profiles.borrow();
-        profiles.iter().find(|profile| profile.name == name).or_else(|| profiles.first()).cloned().unwrap_or_default()
+        let mut profile = profiles
+            .iter()
+            .find(|profile| profile.name == name)
+            .or_else(|| profiles.first())
+            .cloned()
+            .unwrap_or_default();
+        if source.is_none()
+            && let Some(directory) = self.pending_directory.borrow().as_ref()
+        {
+            profile.working_directory = Some(directory.display().to_string());
+        }
+        profile
     }
 
     fn start_terminal(&self, session: SessionId, terminal: TerminalId, source: Option<TerminalId>) -> Result<()> {
@@ -837,6 +852,7 @@ pub fn show_terminal_menu(terminal: TerminalId) {
         has_selection: view.has_selection(),
         read_only: !keyboard_input_enabled(terminal),
         mouse_tracking_allowed: view.mouse_tracking_allowed(),
+        visual_studio_code_available: visual_studio_code_launcher().is_some(),
         profiles,
     };
     let shortcuts = ShortcutMap::with_overrides(&crate::settings_store::current().shortcuts).map;
@@ -886,6 +902,10 @@ impl WorkspaceHost {
                 view.set_mouse_tracking_allowed(!state.mouse_tracking_allowed);
                 view.focus();
             }
+            TerminalMenuCommand::OpenFileManager => {
+                self.open_terminal_folder(terminal, view, FolderTarget::FileExplorer)
+            }
+            TerminalMenuCommand::OpenFolderIn(target) => self.open_terminal_folder(terminal, view, target),
             TerminalMenuCommand::SwitchProfile(index) => {
                 self.switch_terminal_profile(terminal, view, index);
                 view.focus();
@@ -905,6 +925,46 @@ impl WorkspaceHost {
                 view.clear_scrollback_and_reset();
                 view.focus();
             }
+        }
+    }
+
+    /// The folder the terminal is in: what the shell reported, else its profile's starting folder, else the user's folder.
+    fn terminal_directory(&self, terminal: TerminalId, view: &TerminalView) -> Option<std::path::PathBuf> {
+        let profile_name = self.terminal_profiles.borrow().get(&terminal).cloned();
+        let profile =
+            profile_name.and_then(|name| self.profiles.borrow().iter().find(|profile| profile.name == name).cloned());
+        let reported = view
+            .current_directory()
+            .and_then(|reported| reported.to_windows_path(profile.as_ref().and_then(Profile::wsl_distribution)))
+            .filter(|path| path.is_dir());
+        reported
+            .or_else(|| profile.and_then(|profile| profile.working_directory).map(std::path::PathBuf::from))
+            .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+    }
+
+    fn open_terminal_folder(&self, terminal: TerminalId, view: &TerminalView, target: FolderTarget) {
+        let Some(directory) = self.terminal_directory(terminal, view) else {
+            tracing::warn!(terminal_id = %terminal, "no folder known for this terminal");
+            return;
+        };
+        tracing::info!(terminal_id = %terminal, ?target, "opening the terminal's folder");
+        let started = match target {
+            FolderTarget::FileExplorer => std::process::Command::new("explorer.exe").arg(&directory).spawn().map(drop),
+            FolderTarget::VisualStudioCode => match visual_studio_code_launcher() {
+                Some(launcher) => std::process::Command::new(launcher).arg(&directory).spawn().map(drop),
+                None => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "code was not found on the PATH")),
+            },
+            FolderTarget::NewSession => {
+                *self.pending_directory.borrow_mut() = Some(directory.clone());
+                self.add_session(SessionKind::Single);
+                self.pending_directory.borrow_mut().take();
+                Ok(())
+            }
+            FolderTarget::CopyPath => crate::clipboard::set_text(self.window_handle, &directory.display().to_string())
+                .map_err(|error| std::io::Error::other(error.to_string())),
+        };
+        if let Err(error) = started {
+            tracing::error!(terminal_id = %terminal, ?target, %error, "could not open the terminal's folder");
         }
     }
 
@@ -1167,6 +1227,12 @@ fn pointer_position(args: &PointerRoutedEventArgs, relative_to: &Grid) -> Option
 
 struct StartedShell {
     session: TerminalSession,
+}
+
+/// Full path of `code.cmd` (Visual Studio Code's command line launcher) when it is on the PATH.
+fn visual_studio_code_launcher() -> Option<std::path::PathBuf> {
+    use winuake_term::shell::ExecutableLocator;
+    PathVariableLocator::from_path_variable(&std::env::var_os("PATH").unwrap_or_default()).locate("code.cmd")
 }
 
 fn cursor_style_for(setting: CursorShapeSetting) -> CursorStyle {

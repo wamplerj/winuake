@@ -10,6 +10,7 @@ pub mod pty;
 pub mod session;
 pub mod shell;
 pub mod snapshot;
+pub mod working_directory;
 
 #[cfg(windows)]
 pub mod conpty;

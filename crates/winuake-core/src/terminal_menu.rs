@@ -47,6 +47,9 @@ pub enum TerminalMenuCommand {
     CloseTerminal,
     ToggleReadOnly,
     ToggleMouseTracking,
+    /// Opens the terminal's folder in File Explorer.
+    OpenFileManager,
+    OpenFolderIn(FolderTarget),
     /// Applies the profile at this position of `TerminalMenuState::profiles` to the terminal.
     SwitchProfile(usize),
     EditCurrentProfile,
@@ -55,6 +58,17 @@ pub enum TerminalMenuCommand {
     /// Opens the profile settings, where the scrollback length lives.
     AdjustScrollback,
     CloseSession,
+}
+
+/// Where "Open Folder With" can send the terminal's folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderTarget {
+    FileExplorer,
+    VisualStudioCode,
+    /// A new Winuake session starting in that folder.
+    NewSession,
+    /// Puts the folder's path on the clipboard.
+    CopyPath,
 }
 
 /// One profile in the "Switch Profile" submenu.
@@ -71,6 +85,8 @@ pub struct TerminalMenuState {
     pub has_selection: bool,
     pub read_only: bool,
     pub mouse_tracking_allowed: bool,
+    /// `code` is on the PATH, so "Open Folder With" can offer Visual Studio Code.
+    pub visual_studio_code_available: bool,
     pub profiles: Vec<ProfileEntry>,
 }
 
@@ -89,6 +105,18 @@ pub fn terminal_menu(state: &TerminalMenuState, shortcuts: &ShortcutMap) -> Vec<
         clipboard.push(MenuEntry::Item(MenuItem::new("Copy", Copy).with_shortcut(Some(COPY_SHORTCUT.to_owned()))));
     }
     clipboard.push(MenuEntry::Item(MenuItem::new("Paste", Paste).with_shortcut(Some(PASTE_SHORTCUT.to_owned()))));
+
+    let mut open_with = vec![item("File Explorer", OpenFolderIn(FolderTarget::FileExplorer))];
+    if state.visual_studio_code_available {
+        open_with.push(item("Visual Studio Code", OpenFolderIn(FolderTarget::VisualStudioCode)));
+    }
+    open_with.push(MenuEntry::Separator);
+    open_with.push(item("New Winuake Session Here", OpenFolderIn(FolderTarget::NewSession)));
+    open_with.push(item("Copy Path", OpenFolderIn(FolderTarget::CopyPath)));
+    let folder = vec![
+        item("Open File Manager", OpenFileManager),
+        MenuEntry::Submenu { label: "Open Folder With".to_owned(), entries: open_with },
+    ];
 
     let splits = vec![MenuEntry::Submenu {
         label: "Split View".to_owned(),
@@ -144,7 +172,7 @@ pub fn terminal_menu(state: &TerminalMenuState, shortcuts: &ShortcutMap) -> Vec<
     profile.push(item("Edit Current Profile...", EditCurrentProfile));
     let close = vec![item("Close Session", CloseSession)];
 
-    join_groups(vec![clipboard, splits, scrollback, switches, profile, close])
+    join_groups(vec![clipboard, folder, splits, scrollback, switches, profile, close])
 }
 
 /// Flattens groups into one list with a separator between each pair of non-empty groups.
@@ -168,6 +196,7 @@ mod tests {
             has_selection: false,
             read_only: false,
             mouse_tracking_allowed: true,
+            visual_studio_code_available: true,
             profiles: vec![
                 ProfileEntry { name: "PowerShell 7".to_owned(), is_current: true },
                 ProfileEntry { name: "Git Bash".to_owned(), is_current: false },
@@ -204,6 +233,9 @@ mod tests {
             top_level_labels(&entries),
             [
                 "Paste",
+                "-",
+                "Open File Manager",
+                "Open Folder With >",
                 "-",
                 "Split View >",
                 "-",
@@ -277,6 +309,27 @@ mod tests {
             find_item(&entries, TerminalMenuCommand::ClearScrollback).and_then(|item| item.shortcut.clone()),
             None
         );
+    }
+
+    #[test]
+    fn given_visual_studio_code_is_missing_when_building_the_menu_then_open_folder_with_does_not_offer_it() {
+        let with_code = terminal_menu(&state(), &ShortcutMap::with_defaults());
+        let without_code = terminal_menu(
+            &TerminalMenuState { visual_studio_code_available: false, ..state() },
+            &ShortcutMap::with_defaults(),
+        );
+        let code = TerminalMenuCommand::OpenFolderIn(FolderTarget::VisualStudioCode);
+        assert!(find_item(&with_code, code).is_some());
+        assert!(find_item(&without_code, code).is_none());
+        assert!(find_item(&without_code, TerminalMenuCommand::OpenFolderIn(FolderTarget::FileExplorer)).is_some());
+    }
+
+    #[test]
+    fn given_the_menu_when_looking_in_open_folder_with_then_new_session_and_copy_path_are_there() {
+        let entries = terminal_menu(&state(), &ShortcutMap::with_defaults());
+        assert!(find_item(&entries, TerminalMenuCommand::OpenFolderIn(FolderTarget::NewSession)).is_some());
+        assert!(find_item(&entries, TerminalMenuCommand::OpenFolderIn(FolderTarget::CopyPath)).is_some());
+        assert!(find_item(&entries, TerminalMenuCommand::OpenFileManager).is_some());
     }
 
     #[test]
