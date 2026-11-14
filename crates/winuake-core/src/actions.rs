@@ -47,12 +47,14 @@ pub enum Action {
     ClearScrollback,
     /// Winuake addition: clears the screen and scrollback of the active terminal and resets its modes.
     ClearScrollbackAndReset,
+    /// Winuake addition (Konsole's Find): shows the find bar for the active terminal.
+    FindInTerminal,
     /// One-based session position, 1..=10.
     SwitchToSession(u8),
 }
 
 /// Name and default shortcut text of each fixed action, in Yakuake's registration order.
-const FIXED_ACTIONS: [(Action, &str, Option<&str>); 38] = [
+const FIXED_ACTIONS: [(Action, &str, Option<&str>); 39] = [
     (Action::ViewFullScreen, "view-full-screen", Some("Ctrl+Shift+F11")),
     (Action::Quit, "file_quit", Some("Ctrl+Shift+Q")),
     (Action::ToggleWindowState, "toggle-window-state", Some("F12")),
@@ -91,12 +93,13 @@ const FIXED_ACTIONS: [(Action, &str, Option<&str>); 38] = [
     (Action::ToggleTitlebar, "toggle-titlebar", Some("Ctrl+Shift+M")),
     (Action::ClearScrollback, "clear-scrollback", None),
     (Action::ClearScrollbackAndReset, "clear-scrollback-and-reset", Some("Ctrl+Shift+K")),
+    (Action::FindInTerminal, "find-in-terminal", Some("Ctrl+Shift+F")),
 ];
 
 const SWITCH_PREFIX: &str = "switch-to-session-";
 
 impl Action {
-    /// All 48 actions: the 38 fixed ones and `switch-to-session-1..10`.
+    /// All 49 actions: the 39 fixed ones and `switch-to-session-1..10`.
     pub fn all() -> Vec<Action> {
         FIXED_ACTIONS.iter().map(|(action, _, _)| *action).chain((1..=10).map(Action::SwitchToSession)).collect()
     }
@@ -201,13 +204,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn given_the_action_table_when_listing_all_then_there_are_48_with_unique_names() {
+    fn given_the_action_table_when_listing_all_then_there_are_49_with_unique_names() {
         let actions = Action::all();
-        assert_eq!(actions.len(), 48);
+        assert_eq!(actions.len(), 49);
         let mut names: Vec<String> = actions.iter().map(|action| action.name()).collect();
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 48);
+        assert_eq!(names.len(), 49);
     }
 
     #[test]
@@ -232,6 +235,7 @@ mod tests {
             (Action::SplitAuto, "Ctrl+*"),
             (Action::ToggleTitlebar, "Ctrl+Shift+M"),
             (Action::ClearScrollbackAndReset, "Ctrl+Shift+K"),
+            (Action::FindInTerminal, "Ctrl+Shift+F"),
             (Action::ViewFullScreen, "Ctrl+Shift+F11"),
             (Action::Quit, "Ctrl+Shift+Q"),
             (Action::SwitchToSession(1), "Alt+1"),

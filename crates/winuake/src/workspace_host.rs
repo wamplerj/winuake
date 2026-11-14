@@ -480,6 +480,12 @@ impl WorkspaceHost {
                 self.sync_monitoring();
             }
             Action::ToggleTitlebar => self.chrome.toggle_title_bar(),
+            Action::FindInTerminal => {
+                let active = self.workspace.borrow().stack().active_terminal_id();
+                if let Some(terminal) = active {
+                    crate::find_bar::show(terminal);
+                }
+            }
             Action::ClearScrollback => {
                 if let Some(view) = self.active_view() {
                     view.clear_scrollback();
@@ -917,6 +923,7 @@ impl WorkspaceHost {
                     crate::settings_window::show_profile(&profile);
                 }
             }
+            TerminalMenuCommand::Find => crate::find_bar::show(terminal),
             TerminalMenuCommand::ClearScrollback => {
                 view.clear_scrollback();
                 view.focus();

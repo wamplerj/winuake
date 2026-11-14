@@ -59,6 +59,7 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `keep-open` | done | 4 | Title bar pin and menu; saved |
 | `clear-scrollback` | added | 11 | Winuake addition (Konsole's menu item); no default shortcut |
 | `clear-scrollback-and-reset` | added | 11 | Winuake addition: Ctrl+Shift+K |
+| `find-in-terminal` | added | 11 | Winuake addition: Ctrl+Shift+F shows the find bar for the active terminal |
 | `open-settings` | added | 10 | Winuake addition: Ctrl+Shift+, opens the settings tab; rebindable on the Shortcuts page |
 | `manage-profiles` | done | 10 | Opens the settings tab on the Profile page: add, duplicate, delete, default, add detected shells (Windows PowerShell, PowerShell 7, Command Prompt, Git Bash, WSL) |
 | `move-session-left` | done | 4 | Ctrl+Shift+Left, tab menu |
@@ -102,7 +103,7 @@ Right click on a terminal opens it. Middle click pastes. A program that asked fo
 | Scrollback: Clear Scrollback, Clear Scrollback and Reset, Adjust Scrollback... | done | 11 | Reset is a full terminal reset (RIS), so the prompt returns at the shell's next output; Adjust opens the Profile page |
 | Open File Manager | done | 11 | File Explorer in the terminal's folder (see below for how the folder is known) |
 | Open Folder With | done | 11 | File Explorer, Visual Studio Code (when `code.cmd` is on the PATH), New Winuake Session Here (default profile), Copy Path |
-| Find... | planned | 11 | |
+| Find... | done | 11 | Find bar at the top right (Ctrl+Shift+F): search as you type, Enter / Shift+Enter step, Aa = match case, .* = regular expression, Escape closes. Searches screen and scrollback and wraps. Only the current match is highlighted (as the terminal's selection, so Ctrl+Shift+C copies it) |
 
 ## Scripting API (D-Bus `Q_SCRIPTABLE`)
 

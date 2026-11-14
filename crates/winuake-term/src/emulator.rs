@@ -14,6 +14,10 @@ use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::vte::ansi::Processor;
 use std::sync::mpsc::{self, Receiver, Sender};
 
+mod search;
+
+pub use search::{SearchOutcome, SearchQuery, SearchStep};
+
 pub const DEFAULT_SCROLLBACK_LINES: usize = 10_000;
 
 /// Things the terminal wants the host to know about.
@@ -122,6 +126,8 @@ pub struct TerminalEmulator {
     processor: Processor,
     events: Receiver<Event>,
     directory: WorkingDirectoryTracker,
+    /// The match Find has selected, if any.
+    search_match: Option<alacritty_terminal::term::search::Match>,
 }
 
 impl TerminalEmulator {
@@ -134,7 +140,13 @@ impl TerminalEmulator {
         let (sender, events) = mpsc::channel();
         let config = config_for(scrollback_lines, default_cursor);
         let term = Term::new(config, &GridDimensions::from(size), EventForwarder { sender });
-        Self { term, processor: Processor::new(), events, directory: WorkingDirectoryTracker::default() }
+        Self {
+            term,
+            processor: Processor::new(),
+            events,
+            directory: WorkingDirectoryTracker::default(),
+            search_match: None,
+        }
     }
 
     /// The folder the shell last reported (OSC 7 or OSC 9;9), if it ever did.

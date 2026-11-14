@@ -28,6 +28,8 @@ mod diagnostics;
 #[cfg(windows)]
 mod drop_down;
 #[cfg(windows)]
+mod find_bar;
+#[cfg(windows)]
 mod first_run;
 #[cfg(windows)]
 mod flashes;

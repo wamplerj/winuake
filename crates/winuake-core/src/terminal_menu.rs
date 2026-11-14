@@ -53,6 +53,8 @@ pub enum TerminalMenuCommand {
     /// Applies the profile at this position of `TerminalMenuState::profiles` to the terminal.
     SwitchProfile(usize),
     EditCurrentProfile,
+    /// Shows the find bar for this terminal.
+    Find,
     ClearScrollback,
     ClearScrollbackAndReset,
     /// Opens the profile settings, where the scrollback length lives.
@@ -135,7 +137,10 @@ pub fn terminal_menu(state: &TerminalMenuState, shortcuts: &ShortcutMap) -> Vec<
         ],
     }];
 
-    let scrollback = vec![MenuEntry::Submenu {
+    let find_and_scrollback_start =
+        vec![MenuEntry::Item(MenuItem::new("Find...", Find).with_shortcut(shortcut(Action::FindInTerminal)))];
+    let mut scrollback = find_and_scrollback_start;
+    scrollback.push(MenuEntry::Submenu {
         label: "Scrollback".to_owned(),
         entries: vec![
             MenuEntry::Item(
@@ -148,7 +153,7 @@ pub fn terminal_menu(state: &TerminalMenuState, shortcuts: &ShortcutMap) -> Vec<
             MenuEntry::Separator,
             item("Adjust Scrollback...", AdjustScrollback),
         ],
-    }];
+    });
 
     let switches = vec![
         MenuEntry::Item(MenuItem::new("Read-Only", ToggleReadOnly).checked(state.read_only)),
@@ -239,6 +244,7 @@ mod tests {
                 "-",
                 "Split View >",
                 "-",
+                "Find...",
                 "Scrollback >",
                 "-",
                 "Read-Only",
@@ -330,6 +336,13 @@ mod tests {
         assert!(find_item(&entries, TerminalMenuCommand::OpenFolderIn(FolderTarget::NewSession)).is_some());
         assert!(find_item(&entries, TerminalMenuCommand::OpenFolderIn(FolderTarget::CopyPath)).is_some());
         assert!(find_item(&entries, TerminalMenuCommand::OpenFileManager).is_some());
+    }
+
+    #[test]
+    fn given_the_default_shortcuts_when_building_the_menu_then_find_shows_ctrl_shift_f() {
+        let entries = terminal_menu(&state(), &ShortcutMap::with_defaults());
+        let find = find_item(&entries, TerminalMenuCommand::Find).expect("find item");
+        assert_eq!(find.shortcut.as_deref(), Some("Ctrl+Shift+F"));
     }
 
     #[test]

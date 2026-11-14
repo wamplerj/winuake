@@ -183,6 +183,18 @@ impl TerminalView {
         self.apply_size();
     }
 
+    /// Find: selects the next (or previous) match of `query` and scrolls to it.
+    pub fn find(
+        &self,
+        query: &winuake_term::emulator::SearchQuery,
+        step: winuake_term::emulator::SearchStep,
+    ) -> winuake_term::emulator::SearchOutcome {
+        tracing::debug!(terminal_id = %self.id, length = query.text.len(), ?step, "searching the terminal");
+        let outcome = self.session.update_emulator(|emulator| emulator.find(query, step));
+        self.redraw();
+        outcome
+    }
+
     /// Drops the scrollback lines of this terminal.
     pub fn clear_scrollback(&self) {
         tracing::info!(terminal_id = %self.id, "clearing scrollback");

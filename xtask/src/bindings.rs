@@ -55,7 +55,8 @@ const ERGONOMIC_FILTERS: &[&str] = &[
     "Microsoft.UI.Xaml.UIElement::{put_Visibility, add_GotFocus, add_LostFocus, add_PointerEntered, add_PointerExited}",
     "Microsoft.UI.Xaml.Visibility",
     "Microsoft.UI.Xaml.RoutedEventHandler",
-    "Microsoft.UI.Xaml.Controls.TextBox::{get_Text, put_Text, SelectAll}",
+    "Microsoft.UI.Xaml.Controls.TextBox::{get_Text, put_Text, SelectAll, add_TextChanged}",
+    "Microsoft.UI.Xaml.Controls.TextChangedEventHandler",
     "Microsoft.UI.Xaml.Controls.ITextBoxStatics",
     "Microsoft.UI.Xaml.Controls.ITextBoxFactory",
     // Phase 5: settings window controls.
