@@ -22,3 +22,6 @@ packages/
 *.profraw
 lcov.info
 /dist/
+
+# JetBrains IDEs (RustRover, CLion)
+.idea/
