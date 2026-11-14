@@ -591,6 +591,12 @@ fn select_profile(name: &str) {
     SELECTED_PROFILE.with(|slot| *slot.borrow_mut() = name.to_owned());
 }
 
+/// Makes the Profile page show `name`, if the settings tab is open ("Edit Current Profile" in a terminal's menu).
+pub fn show_profile(name: &str) {
+    select_profile(name);
+    refresh_profile_page();
+}
+
 fn profile_row_markup(profile: &winuake_config::profile::Profile, is_default: bool, selected: bool) -> String {
     let background = if selected { "#FF3A4A5A" } else { "#00000000" };
     let program = profile.program.clone().unwrap_or_else(|| "default shell".to_owned());

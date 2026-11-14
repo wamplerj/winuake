@@ -81,6 +81,8 @@ pub struct TerminalView {
     /// Win32 handle of the application window; owns clipboard operations.
     window_handle: isize,
     selecting: Cell<bool>,
+    /// "Allow Mouse Tracking" in the context menu: when off, programs that ask for mouse events get none and the mouse selects text.
+    mouse_tracking_allowed: Cell<bool>,
     /// The button an application (mouse reporting) currently sees as held.
     pressed_button: Cell<Option<MouseButton>>,
     clicks: RefCell<ClickCounter>,
@@ -128,6 +130,7 @@ impl TerminalView {
             characters: RefCell::new(CharacterAssembler::default()),
             window_handle,
             selecting: Cell::new(false),
+            mouse_tracking_allowed: Cell::new(true),
             pressed_button: Cell::new(None),
             clicks: RefCell::new(ClickCounter::default()),
             wheel: RefCell::new(WheelAccumulator::default()),
@@ -141,6 +144,18 @@ impl TerminalView {
         view.start_background_threads()?;
         view.apply_size();
         Ok(view)
+    }
+
+    pub fn mouse_tracking_allowed(&self) -> bool {
+        self.mouse_tracking_allowed.get()
+    }
+
+    pub fn set_mouse_tracking_allowed(&self, allowed: bool) {
+        self.mouse_tracking_allowed.set(allowed);
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.session.with_emulator(|emulator| emulator.has_selection())
     }
 
     /// Translucency: draws the default background in another color and opacity, then redraws.

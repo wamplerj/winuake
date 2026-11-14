@@ -8,13 +8,10 @@ use crate::bindings::{
     ContentControl, FrameworkElement, Grid, Panel, PointerRoutedEventArgs, TextBlock, TextBox, Thickness, UIElement,
     Visibility, XamlReader,
 };
+use crate::popup_menu::{flags, track_menu};
 use crate::skin_assets::AppSkin;
 use crate::skin_chrome::{self, SkinButtonViews, TabLook};
-use crate::window_bindings::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetDoubleClickTime, GetTickCount64, HMENU, HWND, LPARAM,
-    MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, POINT, PostMessageW, SetForegroundWindow, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, TrackPopupMenuEx, WPARAM,
-};
+use crate::window_bindings::{AppendMenuW, GetDoubleClickTime, GetTickCount64, HMENU, MF_SEPARATOR};
 use crate::workspace_host::{self, WorkspaceHost};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -30,7 +27,6 @@ const VK_RETURN: i32 = 0x0D;
 const VK_ESCAPE: i32 = 0x1B;
 /// Pointer travel (DIPs) before a tab press counts as a drag rather than a click.
 const DRAG_THRESHOLD: f64 = 6.0;
-const WM_NULL: u32 = 0;
 
 const COLOR_TAB_SELECTED: &str = "#FF3C3C3C";
 const COLOR_TAB_IDLE: &str = "#FF2B2B2B";
@@ -586,17 +582,6 @@ const TAB_MENU_KEYBOARD_INPUT: usize = 6;
 const TAB_MENU_MONITOR_ACTIVITY: usize = 7;
 const TAB_MENU_MONITOR_SILENCE: usize = 8;
 
-fn flags(enabled: bool, checked: bool) -> u32 {
-    let mut value = MF_STRING as u32;
-    if !enabled {
-        value |= MF_GRAYED as u32;
-    }
-    if checked {
-        value |= MF_CHECKED as u32;
-    }
-    value
-}
-
 /// Tab context menu (Yakuake `TabBar::contextMenuEvent`): move, rename, close, and the per-session switches.
 fn show_tab_menu(session: SessionId) {
     let Some(state) = workspace_host::tab_menu_state(session) else { return };
@@ -704,23 +689,5 @@ fn show_main_menu() {
         id if id >= PROFILE_MENU_BASE => start_profile_session(id - PROFILE_MENU_BASE),
         MAIN_MENU_QUIT => workspace_host::request_quit(),
         _ => {}
-    }
-}
-
-/// Shows a popup menu at the cursor and returns the chosen command id (0 for none).
-fn track_menu(fill: impl FnOnce(HMENU)) -> usize {
-    let owner = HWND(workspace_host::window_handle() as *mut core::ffi::c_void);
-    unsafe {
-        let menu = CreatePopupMenu();
-        fill(menu);
-        let mut cursor = POINT::default();
-        let _ = GetCursorPos(&mut cursor);
-        // The menu only dismisses properly when its owner window is in the foreground.
-        let _ = SetForegroundWindow(owner);
-        let chosen = TrackPopupMenuEx(menu, (TPM_RIGHTBUTTON | TPM_RETURNCMD) as u32, cursor.x, cursor.y, owner, None).0
-            as usize;
-        let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(menu);
-        chosen
     }
 }

@@ -39,6 +39,10 @@ impl TerminalView {
     }
 
     fn report_mouse(&self, action: MouseAction, cell: ViewportCell) {
+        // A read-only terminal sends nothing to the shell, mouse reports included.
+        if !crate::workspace_host::keyboard_input_enabled(self.id) {
+            return;
+        }
         let modes = self.session.with_emulator(|emulator| emulator.input_modes());
         let position = CellPosition {
             column: cell.column.min(usize::from(u16::MAX)) as u16,
@@ -51,10 +55,11 @@ impl TerminalView {
         }
     }
 
-    /// Applications that asked for mouse events get them, unless Shift is held (the xterm convention for "select text instead").
+    /// Applications that asked for mouse events get them, unless Shift is held (the xterm convention for "select text instead")
+    /// or the terminal's mouse tracking is switched off.
     fn application_wants_mouse(&self) -> bool {
         let reporting = self.session.with_emulator(|emulator| emulator.input_modes().mouse_reporting);
-        reporting != MouseReporting::Off && !current_modifiers().shift
+        self.mouse_tracking_allowed.get() && reporting != MouseReporting::Off && !current_modifiers().shift
     }
 
     pub(super) fn handle_pointer_pressed(&self, args: &PointerRoutedEventArgs) {
@@ -83,8 +88,8 @@ impl TerminalView {
                 self.capture_pointer(args);
                 self.redraw();
             }
-            MouseButton::Right if self.copy_selection() => {}
-            MouseButton::Right | MouseButton::Middle => self.paste_clipboard(),
+            MouseButton::Right => crate::workspace_host::show_terminal_menu(self.id),
+            MouseButton::Middle => self.paste_clipboard(),
         }
     }
 
@@ -146,7 +151,7 @@ impl TerminalView {
     }
 
     /// Copies the selection to the clipboard and clears it. Returns whether there was anything to copy.
-    pub(super) fn copy_selection(&self) -> bool {
+    pub(crate) fn copy_selection(&self) -> bool {
         let Some(text) = self.session.with_emulator(|emulator| emulator.selection_text()) else { return false };
         tracing::info!(terminal_id = %self.id, length = text.len(), "copying selection");
         if let Err(error) = clipboard::set_text(self.window_handle, &text) {
@@ -157,7 +162,11 @@ impl TerminalView {
         true
     }
 
-    pub(super) fn paste_clipboard(&self) {
+    pub(crate) fn paste_clipboard(&self) {
+        if !crate::workspace_host::keyboard_input_enabled(self.id) {
+            crate::workspace_host::indicate_blocked_input(self.id);
+            return;
+        }
         let text = match clipboard::get_text(self.window_handle) {
             Ok(Some(text)) => text,
             Ok(None) => return,

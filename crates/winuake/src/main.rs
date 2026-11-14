@@ -36,6 +36,8 @@ mod hold_button;
 #[cfg(windows)]
 mod message_hook;
 #[cfg(windows)]
+mod popup_menu;
+#[cfg(windows)]
 mod resize_grips;
 #[cfg(windows)]
 mod script_server;

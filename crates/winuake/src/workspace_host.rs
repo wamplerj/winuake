@@ -26,6 +26,7 @@ use winuake_core::sessions::workspace::{
     CloseOutcome, CloseQuestion, Confirmation, PaneGeometry, QuitCheck, Workspace, WorkspaceEffect, WorkspaceSettings,
 };
 use winuake_core::shortcut::{Chord, ChordModifiers};
+use winuake_core::terminal_menu::{TerminalMenuCommand, TerminalMenuState, terminal_menu};
 use winuake_render::color::ColorScheme;
 use winuake_render::gpu::FontSpec;
 use winuake_render::scheme_catalog::{self, NamedScheme, find as find_scheme};
@@ -797,6 +798,77 @@ pub fn keyboard_input_enabled(terminal: TerminalId) -> bool {
         return true;
     };
     session.switch_state(TerminalSwitch::KeyboardInput, terminal)
+}
+
+/// Right click on a terminal: shows Konsole's context menu and runs the chosen command on that terminal.
+pub fn show_terminal_menu(terminal: TerminalId) {
+    let Some(host) = host() else { return };
+    let Some(view) = terminal_view::find(terminal) else { return };
+    tracing::info!(terminal_id = %terminal, "showing the terminal menu");
+    // The split and close commands act on the active terminal, so the one clicked becomes active first.
+    let effects = host.workspace.borrow_mut().activate_terminal(terminal);
+    host.apply(effects);
+    let state = TerminalMenuState {
+        has_selection: view.has_selection(),
+        read_only: !keyboard_input_enabled(terminal),
+        mouse_tracking_allowed: view.mouse_tracking_allowed(),
+    };
+    let shortcuts = ShortcutMap::with_overrides(&crate::settings_store::current().shortcuts).map;
+    let Some(command) = crate::popup_menu::show_entries(&terminal_menu(state, &shortcuts)) else {
+        view.focus();
+        return;
+    };
+    tracing::info!(terminal_id = %terminal, ?command, "terminal menu command chosen");
+    host.run_terminal_menu_command(terminal, &view, state, command);
+}
+
+impl WorkspaceHost {
+    fn run_terminal_menu_command(
+        &self,
+        terminal: TerminalId,
+        view: &TerminalView,
+        state: TerminalMenuState,
+        command: TerminalMenuCommand,
+    ) {
+        match command {
+            TerminalMenuCommand::Copy => {
+                view.copy_selection();
+                view.focus();
+            }
+            TerminalMenuCommand::Paste => {
+                view.paste_clipboard();
+                view.focus();
+            }
+            TerminalMenuCommand::SplitLeftRight => self.run_action(Action::SplitLeftRight),
+            TerminalMenuCommand::SplitTopBottom => self.run_action(Action::SplitTopBottom),
+            TerminalMenuCommand::SplitAuto => self.run_action(Action::SplitAuto),
+            TerminalMenuCommand::CloseTerminal | TerminalMenuCommand::CloseSession => self.close_active_terminal(),
+            TerminalMenuCommand::ToggleReadOnly => {
+                let session = self.workspace.borrow().stack().session_for_terminal(terminal);
+                if let Some(session) = session {
+                    // Read-only is the keyboard-input switch turned off.
+                    self.workspace.borrow_mut().set_switch(
+                        session,
+                        Some(terminal),
+                        TerminalSwitch::KeyboardInput,
+                        state.read_only,
+                    );
+                }
+                view.focus();
+            }
+            TerminalMenuCommand::ToggleMouseTracking => {
+                view.set_mouse_tracking_allowed(!state.mouse_tracking_allowed);
+                view.focus();
+            }
+            TerminalMenuCommand::EditCurrentProfile => {
+                let profile = self.terminal_profiles.borrow().get(&terminal).cloned();
+                open_settings(crate::settings_window::PROFILE_PAGE);
+                if let Some(profile) = profile {
+                    crate::settings_window::show_profile(&profile);
+                }
+            }
+        }
+    }
 }
 
 /// A terminal gained keyboard focus.

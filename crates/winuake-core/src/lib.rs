@@ -9,3 +9,4 @@ pub mod notifications;
 pub mod press_and_hold;
 pub mod sessions;
 pub mod shortcut;
+pub mod terminal_menu;

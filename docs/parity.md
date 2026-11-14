@@ -82,6 +82,23 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `toggle-window-state` | done | 3 | Global hotkey (F12 if Windows allows it, else Win+`, Ctrl+`, Ctrl+Alt+`), tray icon, starting a second instance |
 | `view-full-screen` | done | 3 | Ctrl+Shift+F11 |
 
+## Terminal context menu (Konsole's menu as Yakuake shows it)
+
+Right click on a terminal opens it. Middle click pastes. A program that asked for mouse events gets right clicks instead; Shift+right click still opens the menu. Copy and paste moved from right click to Ctrl+Shift+C / Ctrl+Shift+V and middle click.
+
+| Item | Status | Phase | Notes |
+|---|---|---|---|
+| Copy (only with a selection), Paste | done | 11 | |
+| Split View: left/right, top/bottom, automatic, close terminal | done | 11 | Shows the current shortcuts |
+| Read-Only | done | 11 | The terminal's keyboard-input switch; also blocks paste and mouse reports |
+| Allow Mouse Tracking | done | 11 | Per terminal; not tried against a mouse-reporting program on the VM yet |
+| Edit Current Profile... | done | 11 | Opens the settings tab on the Profile page with this terminal's profile selected |
+| Close Session | done | 11 | Closes the clicked terminal |
+| Set Encoding | n/a | | ConPTY is always UTF-8 |
+| Switch Profile, Scrollback | planned | 11 | |
+| Open File Manager, Open Folder With | planned | 11 | |
+| Find... | planned | 11 | |
+
 ## Scripting API (D-Bus `Q_SCRIPTABLE`)
 
 | Method | Status | Phase | Notes |
