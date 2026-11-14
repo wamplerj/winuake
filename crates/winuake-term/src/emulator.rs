@@ -96,6 +96,20 @@ impl Dimensions for GridDimensions {
     }
 }
 
+fn config_for(scrollback_lines: usize, default_cursor: CursorStyle) -> Config {
+    let shape = match default_cursor {
+        CursorStyle::Underline => alacritty_terminal::vte::ansi::CursorShape::Underline,
+        CursorStyle::Beam => alacritty_terminal::vte::ansi::CursorShape::Beam,
+        CursorStyle::HollowBlock => alacritty_terminal::vte::ansi::CursorShape::HollowBlock,
+        CursorStyle::Block => alacritty_terminal::vte::ansi::CursorShape::Block,
+    };
+    Config {
+        scrolling_history: scrollback_lines,
+        default_cursor_style: alacritty_terminal::vte::ansi::CursorStyle { shape, blinking: false },
+        ..Config::default()
+    }
+}
+
 impl From<TerminalSize> for GridDimensions {
     fn from(size: TerminalSize) -> Self {
         Self { columns: usize::from(size.columns).max(1), screen_lines: usize::from(size.rows).max(1) }
@@ -116,19 +130,26 @@ impl TerminalEmulator {
     /// `default_cursor` is the shape shown until a program asks for another (DECSCUSR); `Block` is the usual default.
     pub fn with_cursor(size: TerminalSize, scrollback_lines: usize, default_cursor: CursorStyle) -> Self {
         let (sender, events) = mpsc::channel();
-        let shape = match default_cursor {
-            CursorStyle::Underline => alacritty_terminal::vte::ansi::CursorShape::Underline,
-            CursorStyle::Beam => alacritty_terminal::vte::ansi::CursorShape::Beam,
-            CursorStyle::HollowBlock => alacritty_terminal::vte::ansi::CursorShape::HollowBlock,
-            CursorStyle::Block => alacritty_terminal::vte::ansi::CursorShape::Block,
-        };
-        let config = Config {
-            scrolling_history: scrollback_lines,
-            default_cursor_style: alacritty_terminal::vte::ansi::CursorStyle { shape, blinking: false },
-            ..Config::default()
-        };
+        let config = config_for(scrollback_lines, default_cursor);
         let term = Term::new(config, &GridDimensions::from(size), EventForwarder { sender });
         Self { term, processor: Processor::new(), events }
+    }
+
+    /// Changes the profile-driven defaults of a running terminal (switching profile): how many lines of scrollback are kept (lines beyond a
+    /// smaller limit are dropped) and the cursor shape shown until a program asks for another. What is on screen stays.
+    pub fn apply_defaults(&mut self, scrollback_lines: usize, default_cursor: CursorStyle) {
+        self.term.set_options(config_for(scrollback_lines, default_cursor));
+    }
+
+    /// Drops all scrollback lines; the screen and the cursor stay.
+    pub fn clear_scrollback(&mut self) {
+        self.term.grid_mut().clear_history();
+    }
+
+    /// Full reset (RIS): clears the screen and scrollback and puts every terminal mode back to its default. The shell is not told, so its
+    /// prompt comes back at its next output.
+    pub fn reset_and_clear(&mut self) -> Vec<TerminalEvent> {
+        self.advance(b"\x1bc")
     }
 
     /// Feeds shell output through the VT parser and returns the host-visible events it produced.
@@ -310,6 +331,60 @@ mod tests {
         let mut terminal = TerminalEmulator::new(TerminalSize::new(10, 2), 3);
         terminal.advance(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n");
         assert_eq!(terminal.scrollback_line_count(), 3);
+    }
+
+    #[test]
+    fn given_scrollback_when_clearing_it_then_the_history_goes_and_the_screen_stays() {
+        let mut terminal = emulator(10, 2);
+        terminal.advance(b"a\r\nb\r\nc\r\nd");
+        terminal.scroll_view(ScrollRequest::Top);
+        terminal.clear_scrollback();
+        assert_eq!(terminal.scrollback_line_count(), 0);
+        assert_eq!(terminal.display_offset(), 0);
+        assert_eq!(terminal.screen_text(), "c\nd");
+    }
+
+    #[test]
+    fn given_scrollback_and_screen_text_when_resetting_then_both_are_empty_and_the_cursor_is_home() {
+        let mut terminal = emulator(10, 2);
+        terminal.advance(b"a\r\nb\r\nc\r\nd");
+        terminal.reset_and_clear();
+        assert_eq!(terminal.scrollback_line_count(), 0);
+        assert_eq!(terminal.screen_text(), "");
+        assert_eq!(terminal.cursor_position(), CursorPosition { row: 0, column: 0 });
+    }
+
+    #[test]
+    fn given_a_program_changed_modes_when_resetting_then_modes_return_to_their_defaults() {
+        let mut terminal = emulator(10, 2);
+        terminal.advance(b"\x1b[?1000h");
+        assert_ne!(terminal.input_modes().mouse_reporting, MouseReporting::Off);
+        terminal.reset_and_clear();
+        assert_eq!(terminal.input_modes().mouse_reporting, MouseReporting::Off);
+    }
+
+    #[test]
+    fn given_a_running_terminal_when_the_scrollback_limit_shrinks_then_older_lines_are_dropped() {
+        let mut terminal = TerminalEmulator::new(TerminalSize::new(10, 2), 100);
+        terminal.advance(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n");
+        assert_eq!(terminal.scrollback_line_count(), 6);
+        terminal.apply_defaults(3, CursorStyle::Block);
+        assert_eq!(terminal.scrollback_line_count(), 3);
+    }
+
+    #[test]
+    fn given_a_running_terminal_when_the_default_cursor_changes_then_the_snapshot_uses_it() {
+        let mut terminal = emulator(10, 2);
+        terminal.apply_defaults(100, CursorStyle::Beam);
+        assert_eq!(terminal.snapshot().cursor.map(|cursor| cursor.style), Some(CursorStyle::Beam));
+    }
+
+    #[test]
+    fn given_a_program_chose_a_cursor_when_defaults_change_then_the_program_choice_stays() {
+        let mut terminal = emulator(10, 2);
+        terminal.advance(b"\x1b[4 q");
+        terminal.apply_defaults(100, CursorStyle::Beam);
+        assert_eq!(terminal.snapshot().cursor.map(|cursor| cursor.style), Some(CursorStyle::Underline));
     }
 
     #[test]

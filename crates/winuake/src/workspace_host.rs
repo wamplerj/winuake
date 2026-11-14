@@ -26,7 +26,7 @@ use winuake_core::sessions::workspace::{
     CloseOutcome, CloseQuestion, Confirmation, PaneGeometry, QuitCheck, Workspace, WorkspaceEffect, WorkspaceSettings,
 };
 use winuake_core::shortcut::{Chord, ChordModifiers};
-use winuake_core::terminal_menu::{TerminalMenuCommand, TerminalMenuState, terminal_menu};
+use winuake_core::terminal_menu::{ProfileEntry, TerminalMenuCommand, TerminalMenuState, terminal_menu};
 use winuake_render::color::ColorScheme;
 use winuake_render::gpu::FontSpec;
 use winuake_render::scheme_catalog::{self, NamedScheme, find as find_scheme};
@@ -134,6 +134,11 @@ impl WorkspaceHost {
 
     pub fn workspace(&self) -> std::cell::Ref<'_, Workspace> {
         self.workspace.borrow()
+    }
+
+    fn active_view(&self) -> Option<Rc<TerminalView>> {
+        let active = self.workspace.borrow().stack().active_terminal_id();
+        active.and_then(terminal_view::find)
     }
 
     pub fn focus_active_terminal(&self) {
@@ -460,6 +465,16 @@ impl WorkspaceHost {
                 self.sync_monitoring();
             }
             Action::ToggleTitlebar => self.chrome.toggle_title_bar(),
+            Action::ClearScrollback => {
+                if let Some(view) = self.active_view() {
+                    view.clear_scrollback();
+                }
+            }
+            Action::ClearScrollbackAndReset => {
+                if let Some(view) = self.active_view() {
+                    view.clear_scrollback_and_reset();
+                }
+            }
             Action::SwitchToSession(number) => {
                 self.perform(|workspace| workspace.raise_session_at_tab(usize::from(number) - 1));
             }
@@ -808,18 +823,29 @@ pub fn show_terminal_menu(terminal: TerminalId) {
     // The split and close commands act on the active terminal, so the one clicked becomes active first.
     let effects = host.workspace.borrow_mut().activate_terminal(terminal);
     host.apply(effects);
+    let current_profile = host.terminal_profiles.borrow().get(&terminal).cloned();
+    let profiles = host
+        .profiles
+        .borrow()
+        .iter()
+        .map(|profile| ProfileEntry {
+            name: profile.name.clone(),
+            is_current: Some(&profile.name) == current_profile.as_ref(),
+        })
+        .collect();
     let state = TerminalMenuState {
         has_selection: view.has_selection(),
         read_only: !keyboard_input_enabled(terminal),
         mouse_tracking_allowed: view.mouse_tracking_allowed(),
+        profiles,
     };
     let shortcuts = ShortcutMap::with_overrides(&crate::settings_store::current().shortcuts).map;
-    let Some(command) = crate::popup_menu::show_entries(&terminal_menu(state, &shortcuts)) else {
+    let Some(command) = crate::popup_menu::show_entries(&terminal_menu(&state, &shortcuts)) else {
         view.focus();
         return;
     };
     tracing::info!(terminal_id = %terminal, ?command, "terminal menu command chosen");
-    host.run_terminal_menu_command(terminal, &view, state, command);
+    host.run_terminal_menu_command(terminal, &view, &state, command);
 }
 
 impl WorkspaceHost {
@@ -827,7 +853,7 @@ impl WorkspaceHost {
         &self,
         terminal: TerminalId,
         view: &TerminalView,
-        state: TerminalMenuState,
+        state: &TerminalMenuState,
         command: TerminalMenuCommand,
     ) {
         match command {
@@ -860,14 +886,44 @@ impl WorkspaceHost {
                 view.set_mouse_tracking_allowed(!state.mouse_tracking_allowed);
                 view.focus();
             }
-            TerminalMenuCommand::EditCurrentProfile => {
+            TerminalMenuCommand::SwitchProfile(index) => {
+                self.switch_terminal_profile(terminal, view, index);
+                view.focus();
+            }
+            TerminalMenuCommand::EditCurrentProfile | TerminalMenuCommand::AdjustScrollback => {
                 let profile = self.terminal_profiles.borrow().get(&terminal).cloned();
                 open_settings(crate::settings_window::PROFILE_PAGE);
                 if let Some(profile) = profile {
                     crate::settings_window::show_profile(&profile);
                 }
             }
+            TerminalMenuCommand::ClearScrollback => {
+                view.clear_scrollback();
+                view.focus();
+            }
+            TerminalMenuCommand::ClearScrollbackAndReset => {
+                view.clear_scrollback_and_reset();
+                view.focus();
+            }
         }
+    }
+
+    /// Applies another profile's look (font, colors, cursor, scrollback) to a running terminal. The shell keeps running; later splits of
+    /// this terminal use the new profile.
+    fn switch_terminal_profile(&self, terminal: TerminalId, view: &TerminalView, index: usize) {
+        let profile = self.profiles.borrow().get(index).cloned();
+        let Some(profile) = profile else { return };
+        tracing::info!(terminal_id = %terminal, profile = %profile.name, "switching the terminal's profile");
+        let font = FontSpec { family: profile.font_family.clone(), size_points: profile.font_size_points };
+        let scheme = self.scheme_for(&profile);
+        view.apply_profile(
+            &font,
+            scheme,
+            profile.cursor_blink,
+            cursor_style_for(profile.cursor_shape),
+            profile.scrollback_lines as usize,
+        );
+        self.terminal_profiles.borrow_mut().insert(terminal, profile.name);
     }
 }
 
@@ -1113,6 +1169,14 @@ struct StartedShell {
     session: TerminalSession,
 }
 
+fn cursor_style_for(setting: CursorShapeSetting) -> CursorStyle {
+    match setting {
+        CursorShapeSetting::Block => CursorStyle::Block,
+        CursorShapeSetting::Underline => CursorStyle::Underline,
+        CursorShapeSetting::Bar => CursorStyle::Beam,
+    }
+}
+
 fn start_shell(id: TerminalId, profile: &Profile) -> Result<StartedShell> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let default_shell =
@@ -1136,11 +1200,7 @@ fn start_shell(id: TerminalId, profile: &Profile) -> Result<StartedShell> {
     };
     let options = SessionOptions {
         scrollback_lines: profile.scrollback_lines as usize,
-        cursor: match profile.cursor_shape {
-            CursorShapeSetting::Block => CursorStyle::Block,
-            CursorShapeSetting::Underline => CursorStyle::Underline,
-            CursorShapeSetting::Bar => CursorStyle::Beam,
-        },
+        cursor: cursor_style_for(profile.cursor_shape),
     };
     let session = TerminalSession::start_with_options(id, &ConPtyBackend, &request, &options).map_err(|error| {
         tracing::error!(terminal_id = %id, %error, "could not start the shell");

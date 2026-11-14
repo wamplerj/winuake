@@ -163,6 +163,20 @@ impl TerminalRenderer {
         Ok(())
     }
 
+    /// Switches to another font and size (a new profile); cell metrics change, so callers must recompute the grid.
+    pub fn set_font(&mut self, font: &FontSpec, dpi: f32) -> Result<()> {
+        let (family, text_formats, metrics) = unsafe {
+            let family = resolve_font_family(&self.dwrite, &font.family)?;
+            let (text_formats, metrics) = create_fonts(&self.dwrite, &family, font.size_points, dpi)?;
+            (family, text_formats, metrics)
+        };
+        self.font_family = family;
+        self.font_size_points = font.size_points;
+        self.text_formats = text_formats;
+        self.metrics = metrics;
+        Ok(())
+    }
+
     /// XAML scales swap chain content by the panel's composition scale; applying the inverse keeps pixels 1:1.
     pub fn set_composition_scale(&self, scale: f32) -> Result<()> {
         let inverse = 1.0 / scale.max(0.1);

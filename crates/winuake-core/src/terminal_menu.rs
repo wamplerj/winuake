@@ -47,16 +47,31 @@ pub enum TerminalMenuCommand {
     CloseTerminal,
     ToggleReadOnly,
     ToggleMouseTracking,
+    /// Applies the profile at this position of `TerminalMenuState::profiles` to the terminal.
+    SwitchProfile(usize),
     EditCurrentProfile,
+    ClearScrollback,
+    ClearScrollbackAndReset,
+    /// Opens the profile settings, where the scrollback length lives.
+    AdjustScrollback,
     CloseSession,
 }
 
+/// One profile in the "Switch Profile" submenu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileEntry {
+    pub name: String,
+    /// The profile the terminal uses now.
+    pub is_current: bool,
+}
+
 /// What the menu needs to know about the terminal it was opened on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalMenuState {
     pub has_selection: bool,
     pub read_only: bool,
     pub mouse_tracking_allowed: bool,
+    pub profiles: Vec<ProfileEntry>,
 }
 
 /// Shortcut text the menu shows for the clipboard commands; they are fixed keys, not rebindable actions.
@@ -64,7 +79,7 @@ const COPY_SHORTCUT: &str = "Ctrl+Shift+C";
 const PASTE_SHORTCUT: &str = "Ctrl+Shift+V";
 
 /// The menu in Konsole's order. Groups are separated by lines; a group with nothing in it leaves no line behind.
-pub fn terminal_menu(state: TerminalMenuState, shortcuts: &ShortcutMap) -> Vec<MenuEntry<TerminalMenuCommand>> {
+pub fn terminal_menu(state: &TerminalMenuState, shortcuts: &ShortcutMap) -> Vec<MenuEntry<TerminalMenuCommand>> {
     use TerminalMenuCommand::*;
     let shortcut = |action: Action| shortcuts.shortcut_for(action).map(|chord| chord.to_string());
     let item = |label: &str, command: TerminalMenuCommand| MenuEntry::Item(MenuItem::new(label, command));
@@ -92,6 +107,21 @@ pub fn terminal_menu(state: TerminalMenuState, shortcuts: &ShortcutMap) -> Vec<M
         ],
     }];
 
+    let scrollback = vec![MenuEntry::Submenu {
+        label: "Scrollback".to_owned(),
+        entries: vec![
+            MenuEntry::Item(
+                MenuItem::new("Clear Scrollback", ClearScrollback).with_shortcut(shortcut(Action::ClearScrollback)),
+            ),
+            MenuEntry::Item(
+                MenuItem::new("Clear Scrollback and Reset", ClearScrollbackAndReset)
+                    .with_shortcut(shortcut(Action::ClearScrollbackAndReset)),
+            ),
+            MenuEntry::Separator,
+            item("Adjust Scrollback...", AdjustScrollback),
+        ],
+    }];
+
     let switches = vec![
         MenuEntry::Item(MenuItem::new("Read-Only", ToggleReadOnly).checked(state.read_only)),
         MenuEntry::Item(
@@ -99,10 +129,22 @@ pub fn terminal_menu(state: TerminalMenuState, shortcuts: &ShortcutMap) -> Vec<M
         ),
     ];
 
-    let profile = vec![item("Edit Current Profile...", EditCurrentProfile)];
+    let mut profile = Vec::new();
+    if !state.profiles.is_empty() {
+        let choices = state
+            .profiles
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                MenuEntry::Item(MenuItem::new(&entry.name, SwitchProfile(index)).checked(entry.is_current))
+            })
+            .collect();
+        profile.push(MenuEntry::Submenu { label: "Switch Profile".to_owned(), entries: choices });
+    }
+    profile.push(item("Edit Current Profile...", EditCurrentProfile));
     let close = vec![item("Close Session", CloseSession)];
 
-    join_groups(vec![clipboard, splits, switches, profile, close])
+    join_groups(vec![clipboard, splits, scrollback, switches, profile, close])
 }
 
 /// Flattens groups into one list with a separator between each pair of non-empty groups.
@@ -122,7 +164,15 @@ mod tests {
     use super::*;
 
     fn state() -> TerminalMenuState {
-        TerminalMenuState { has_selection: false, read_only: false, mouse_tracking_allowed: true }
+        TerminalMenuState {
+            has_selection: false,
+            read_only: false,
+            mouse_tracking_allowed: true,
+            profiles: vec![
+                ProfileEntry { name: "PowerShell 7".to_owned(), is_current: true },
+                ProfileEntry { name: "Git Bash".to_owned(), is_current: false },
+            ],
+        }
     }
 
     fn top_level_labels(entries: &[MenuEntry<TerminalMenuCommand>]) -> Vec<String> {
@@ -149,7 +199,7 @@ mod tests {
 
     #[test]
     fn given_no_selection_when_building_the_menu_then_copy_is_absent_and_the_groups_follow_konsole() {
-        let entries = terminal_menu(state(), &ShortcutMap::with_defaults());
+        let entries = terminal_menu(&state(), &ShortcutMap::with_defaults());
         assert_eq!(
             top_level_labels(&entries),
             [
@@ -157,9 +207,12 @@ mod tests {
                 "-",
                 "Split View >",
                 "-",
+                "Scrollback >",
+                "-",
                 "Read-Only",
                 "Allow Mouse Tracking",
                 "-",
+                "Switch Profile >",
                 "Edit Current Profile...",
                 "-",
                 "Close Session"
@@ -170,14 +223,14 @@ mod tests {
     #[test]
     fn given_a_selection_when_building_the_menu_then_copy_comes_before_paste() {
         let entries =
-            terminal_menu(TerminalMenuState { has_selection: true, ..state() }, &ShortcutMap::with_defaults());
+            terminal_menu(&TerminalMenuState { has_selection: true, ..state() }, &ShortcutMap::with_defaults());
         assert_eq!(&top_level_labels(&entries)[..2], ["Copy", "Paste"]);
     }
 
     #[test]
     fn given_read_only_and_tracking_off_when_building_the_menu_then_the_check_marks_follow() {
         let entries = terminal_menu(
-            TerminalMenuState { read_only: true, mouse_tracking_allowed: false, ..state() },
+            &TerminalMenuState { read_only: true, mouse_tracking_allowed: false, ..state() },
             &ShortcutMap::with_defaults(),
         );
         assert!(find_item(&entries, TerminalMenuCommand::ToggleReadOnly).is_some_and(|item| item.checked));
@@ -186,7 +239,7 @@ mod tests {
 
     #[test]
     fn given_the_default_shortcuts_when_building_the_menu_then_split_items_show_them() {
-        let entries = terminal_menu(state(), &ShortcutMap::with_defaults());
+        let entries = terminal_menu(&state(), &ShortcutMap::with_defaults());
         let split = find_item(&entries, TerminalMenuCommand::SplitLeftRight).expect("split item");
         assert_eq!(split.shortcut.as_deref(), Some("Ctrl+("));
     }
@@ -195,8 +248,35 @@ mod tests {
     fn given_an_unbound_split_shortcut_when_building_the_menu_then_the_item_shows_no_shortcut() {
         let mut shortcuts = ShortcutMap::with_defaults();
         shortcuts.unbind(Action::SplitAuto);
-        let entries = terminal_menu(state(), &shortcuts);
+        let entries = terminal_menu(&state(), &shortcuts);
         assert_eq!(find_item(&entries, TerminalMenuCommand::SplitAuto).and_then(|item| item.shortcut.clone()), None);
+    }
+
+    #[test]
+    fn given_profiles_when_building_the_menu_then_switch_profile_lists_them_with_the_current_one_checked() {
+        let entries = terminal_menu(&state(), &ShortcutMap::with_defaults());
+        let current = find_item(&entries, TerminalMenuCommand::SwitchProfile(0)).expect("first profile");
+        let other = find_item(&entries, TerminalMenuCommand::SwitchProfile(1)).expect("second profile");
+        assert_eq!((current.label.as_str(), current.checked), ("PowerShell 7", true));
+        assert_eq!((other.label.as_str(), other.checked), ("Git Bash", false));
+    }
+
+    #[test]
+    fn given_no_profiles_when_building_the_menu_then_there_is_no_switch_profile_submenu() {
+        let entries =
+            terminal_menu(&TerminalMenuState { profiles: Vec::new(), ..state() }, &ShortcutMap::with_defaults());
+        assert!(!top_level_labels(&entries).contains(&"Switch Profile >".to_owned()));
+    }
+
+    #[test]
+    fn given_the_default_shortcuts_when_building_the_menu_then_clear_and_reset_shows_ctrl_shift_k() {
+        let entries = terminal_menu(&state(), &ShortcutMap::with_defaults());
+        let reset = find_item(&entries, TerminalMenuCommand::ClearScrollbackAndReset).expect("reset item");
+        assert_eq!(reset.shortcut.as_deref(), Some("Ctrl+Shift+K"));
+        assert_eq!(
+            find_item(&entries, TerminalMenuCommand::ClearScrollback).and_then(|item| item.shortcut.clone()),
+            None
+        );
     }
 
     #[test]

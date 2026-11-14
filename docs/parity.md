@@ -57,6 +57,8 @@ Status: `todo` / `partial` / `done` / `n/a` (with reason). Baseline: Yakuake `21
 | `increase-window-height` | done | 3 | Alt+Shift+Down |
 | `increase-window-width` | done | 3 | Alt+Shift+Right |
 | `keep-open` | done | 4 | Title bar pin and menu; saved |
+| `clear-scrollback` | added | 11 | Winuake addition (Konsole's menu item); no default shortcut |
+| `clear-scrollback-and-reset` | added | 11 | Winuake addition: Ctrl+Shift+K |
 | `open-settings` | added | 10 | Winuake addition: Ctrl+Shift+, opens the settings tab; rebindable on the Shortcuts page |
 | `manage-profiles` | done | 10 | Opens the settings tab on the Profile page: add, duplicate, delete, default, add detected shells (Windows PowerShell, PowerShell 7, Command Prompt, Git Bash, WSL) |
 | `move-session-left` | done | 4 | Ctrl+Shift+Left, tab menu |
@@ -95,7 +97,8 @@ Right click on a terminal opens it. Middle click pastes. A program that asked fo
 | Edit Current Profile... | done | 11 | Opens the settings tab on the Profile page with this terminal's profile selected |
 | Close Session | done | 11 | Closes the clicked terminal |
 | Set Encoding | n/a | | ConPTY is always UTF-8 |
-| Switch Profile, Scrollback | planned | 11 | |
+| Switch Profile | done | 11 | Applies the profile's font, size, colors, cursor and scrollback to the running terminal; the shell and screen stay; later splits use the new profile |
+| Scrollback: Clear Scrollback, Clear Scrollback and Reset, Adjust Scrollback... | done | 11 | Reset is a full terminal reset (RIS), so the prompt returns at the shell's next output; Adjust opens the Profile page |
 | Open File Manager, Open Folder With | planned | 11 | |
 | Find... | planned | 11 | |
 

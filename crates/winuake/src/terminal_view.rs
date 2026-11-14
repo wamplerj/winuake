@@ -72,9 +72,9 @@ pub struct TerminalView {
     panel: SwapChainPanel,
     session: Arc<TerminalSession>,
     render: RefCell<RenderState>,
-    scheme: ColorScheme,
+    scheme: RefCell<ColorScheme>,
     /// Profile setting: when off the cursor stays solid.
-    cursor_blink: bool,
+    cursor_blink: Arc<AtomicBool>,
     /// A focus request has not succeeded yet (the view was not in the tree).
     focus_wanted: Cell<bool>,
     characters: RefCell<CharacterAssembler>,
@@ -124,8 +124,8 @@ impl TerminalView {
             panel,
             session,
             render: RefCell::new(RenderState { renderer, scale: 1.0 }),
-            scheme,
-            cursor_blink,
+            scheme: RefCell::new(scheme),
+            cursor_blink: Arc::new(AtomicBool::new(cursor_blink)),
             focus_wanted: Cell::new(false),
             characters: RefCell::new(CharacterAssembler::default()),
             window_handle,
@@ -156,6 +156,42 @@ impl TerminalView {
 
     pub fn has_selection(&self) -> bool {
         self.session.with_emulator(|emulator| emulator.has_selection())
+    }
+
+    /// Switch Profile: the font, colors, cursor and scrollback of another profile, applied to this running terminal. The shell and what is on
+    /// screen stay; the grid is refitted because the cell size may change.
+    pub fn apply_profile(
+        &self,
+        font: &FontSpec,
+        scheme: ColorScheme,
+        cursor_blink: bool,
+        cursor: winuake_term::snapshot::CursorStyle,
+        scrollback_lines: usize,
+    ) {
+        let scale = self.render.borrow().scale;
+        if let Err(error) = self.render.borrow_mut().renderer.set_font(font, 96.0 * scale) {
+            tracing::error!(terminal_id = %self.id, %error, "could not switch the terminal font");
+        }
+        *self.scheme.borrow_mut() = scheme;
+        self.cursor_blink.store(cursor_blink, Ordering::Relaxed);
+        self.session.update_emulator(|emulator| emulator.apply_defaults(scrollback_lines, cursor));
+        self.apply_size();
+    }
+
+    /// Drops the scrollback lines of this terminal.
+    pub fn clear_scrollback(&self) {
+        tracing::info!(terminal_id = %self.id, "clearing scrollback");
+        self.session.update_emulator(|emulator| emulator.clear_scrollback());
+        self.redraw();
+    }
+
+    /// Clears screen and scrollback and resets the terminal's modes.
+    pub fn clear_scrollback_and_reset(&self) {
+        tracing::info!(terminal_id = %self.id, "clearing scrollback and resetting the terminal");
+        self.session.update_emulator(|emulator| {
+            emulator.reset_and_clear();
+        });
+        self.redraw();
     }
 
     /// Translucency: draws the default background in another color and opacity, then redraws.
@@ -259,15 +295,15 @@ impl TerminalView {
             Arc::clone(&self.redraw_pending),
             Arc::downgrade(&self.alive),
         );
-        if self.cursor_blink {
-            spawn_cursor_blinker(
-                self.id,
-                dispatcher,
-                Arc::clone(&self.cursor_visible),
-                Arc::clone(&self.redraw_pending),
-                Arc::downgrade(&self.alive),
-            );
-        }
+        // Always running: switching to a profile that blinks (or stops blinking) only flips the flag it watches.
+        spawn_cursor_blinker(
+            self.id,
+            dispatcher,
+            Arc::clone(&self.cursor_blink),
+            Arc::clone(&self.cursor_visible),
+            Arc::clone(&self.redraw_pending),
+            Arc::downgrade(&self.alive),
+        );
         Ok(())
     }
 
@@ -310,7 +346,7 @@ impl TerminalView {
     fn redraw(&self) {
         let snapshot = self.session.with_emulator(|emulator| emulator.snapshot());
         let cursor_visible = self.cursor_visible.load(Ordering::Relaxed);
-        if let Err(error) = self.render.borrow_mut().renderer.render(&snapshot, &self.scheme, cursor_visible) {
+        if let Err(error) = self.render.borrow_mut().renderer.render(&snapshot, &self.scheme.borrow(), cursor_visible) {
             tracing::error!(terminal_id = %self.id, %error, "failed to draw terminal");
         }
     }
@@ -471,6 +507,7 @@ fn spawn_event_pump(
 fn spawn_cursor_blinker(
     id: TerminalId,
     dispatcher: DispatcherQueue,
+    blink_enabled: Arc<AtomicBool>,
     cursor_visible: Arc<AtomicBool>,
     pending: Arc<AtomicBool>,
     alive: Weak<()>,
@@ -478,8 +515,13 @@ fn spawn_cursor_blinker(
     let spawned = thread::Builder::new().name(format!("terminal-{id}-blink")).spawn(move || {
         while alive.upgrade().is_some() {
             thread::sleep(CURSOR_BLINK_INTERVAL);
-            cursor_visible.fetch_xor(true, Ordering::Relaxed);
-            request_redraw(id, &dispatcher, &pending);
+            if blink_enabled.load(Ordering::Relaxed) {
+                cursor_visible.fetch_xor(true, Ordering::Relaxed);
+                request_redraw(id, &dispatcher, &pending);
+            } else if !cursor_visible.swap(true, Ordering::Relaxed) {
+                // Blinking was switched off while the cursor was hidden: show it again.
+                request_redraw(id, &dispatcher, &pending);
+            }
         }
     });
     if let Err(error) = spawned {

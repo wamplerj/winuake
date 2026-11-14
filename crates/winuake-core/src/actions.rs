@@ -43,12 +43,16 @@ pub enum Action {
     ToggleSessionMonitorActivity,
     ToggleSessionMonitorSilence,
     ToggleTitlebar,
+    /// Winuake addition (Konsole has it in the terminal menu): drops the scrollback of the active terminal.
+    ClearScrollback,
+    /// Winuake addition: clears the screen and scrollback of the active terminal and resets its modes.
+    ClearScrollbackAndReset,
     /// One-based session position, 1..=10.
     SwitchToSession(u8),
 }
 
 /// Name and default shortcut text of each fixed action, in Yakuake's registration order.
-const FIXED_ACTIONS: [(Action, &str, Option<&str>); 36] = [
+const FIXED_ACTIONS: [(Action, &str, Option<&str>); 38] = [
     (Action::ViewFullScreen, "view-full-screen", Some("Ctrl+Shift+F11")),
     (Action::Quit, "file_quit", Some("Ctrl+Shift+Q")),
     (Action::ToggleWindowState, "toggle-window-state", Some("F12")),
@@ -85,12 +89,14 @@ const FIXED_ACTIONS: [(Action, &str, Option<&str>); 36] = [
     (Action::ToggleSessionMonitorActivity, "toggle-session-monitor-activity", Some("Ctrl+Shift+A")),
     (Action::ToggleSessionMonitorSilence, "toggle-session-monitor-silence", Some("Ctrl+Shift+I")),
     (Action::ToggleTitlebar, "toggle-titlebar", Some("Ctrl+Shift+M")),
+    (Action::ClearScrollback, "clear-scrollback", None),
+    (Action::ClearScrollbackAndReset, "clear-scrollback-and-reset", Some("Ctrl+Shift+K")),
 ];
 
 const SWITCH_PREFIX: &str = "switch-to-session-";
 
 impl Action {
-    /// All 46 actions: the 36 fixed ones and `switch-to-session-1..10`.
+    /// All 48 actions: the 38 fixed ones and `switch-to-session-1..10`.
     pub fn all() -> Vec<Action> {
         FIXED_ACTIONS.iter().map(|(action, _, _)| *action).chain((1..=10).map(Action::SwitchToSession)).collect()
     }
@@ -195,13 +201,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn given_the_action_table_when_listing_all_then_there_are_46_with_unique_names() {
+    fn given_the_action_table_when_listing_all_then_there_are_48_with_unique_names() {
         let actions = Action::all();
-        assert_eq!(actions.len(), 46);
+        assert_eq!(actions.len(), 48);
         let mut names: Vec<String> = actions.iter().map(|action| action.name()).collect();
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 46);
+        assert_eq!(names.len(), 48);
     }
 
     #[test]
@@ -225,6 +231,7 @@ mod tests {
             (Action::SplitLeftRight, "Ctrl+("),
             (Action::SplitAuto, "Ctrl+*"),
             (Action::ToggleTitlebar, "Ctrl+Shift+M"),
+            (Action::ClearScrollbackAndReset, "Ctrl+Shift+K"),
             (Action::ViewFullScreen, "Ctrl+Shift+F11"),
             (Action::Quit, "Ctrl+Shift+Q"),
             (Action::SwitchToSession(1), "Alt+1"),
