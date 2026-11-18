@@ -120,7 +120,7 @@ fn shortcuts_markup(settings: &Settings) -> String {
         .into_iter()
         .map(|action| {
             let name = control_name("S", &action.name());
-            let chord = map.shortcut_for(action).map(|chord| chord.to_string()).unwrap_or_default();
+            let chord = effective_shortcut_text(&map, settings, action);
             format!(
                 r#"<StackPanel Margin="0,8,0,0"><TextBlock Text="{}" Foreground="{DIM}" FontSize="12"/><TextBox x:Name="{name}" Text="{chord}" IsReadOnly="True" PlaceholderText="None" MinWidth="320" HorizontalAlignment="Left"/></StackPanel>"#,
                 escape(&action_label(action))
@@ -354,6 +354,13 @@ fn restore(text_box: &TextBox, key: &str) {
 
 /// `Some(text)` sets the override (`none` unbinds); `None` removes the override so the default applies again.
 fn set_shortcut(action: Action, chord: Option<&str>) {
+    if action == Action::ToggleWindowState {
+        // The global toggle is a hotkey, not a window shortcut: it lives in `toggle_hotkey` (unset means the built-in F12 chain).
+        settings_store::update(|settings| {
+            settings.toggle_hotkey = chord.filter(|text| !text.eq_ignore_ascii_case("none")).map(str::to_owned)
+        });
+        return;
+    }
     settings_store::update(|settings| match chord {
         Some(text) => {
             let is_default = action.default_shortcut().is_some_and(|default| default.to_string() == text);
@@ -369,6 +376,19 @@ fn set_shortcut(action: Action, chord: Option<&str>) {
     });
 }
 
+/// What the Shortcuts page shows for an action. The global toggle is not in the window shortcut map; it shows `toggle_hotkey`, or the
+/// default F12 when none is set.
+fn effective_shortcut_text(map: &ShortcutMap, settings: &Settings, action: Action) -> String {
+    if action == Action::ToggleWindowState {
+        return settings
+            .toggle_hotkey
+            .clone()
+            .or_else(|| action.default_shortcut().map(|chord| chord.to_string()))
+            .unwrap_or_default();
+    }
+    map.shortcut_for(action).map(|chord| chord.to_string()).unwrap_or_default()
+}
+
 /// Shows every action's effective chord again, since taking a chord from another action changes that action's box too.
 fn refresh_shortcut_boxes(any_box: &TextBox) {
     let map = ShortcutMap::with_overrides(&settings_store::current().shortcuts).map;
@@ -376,7 +396,7 @@ fn refresh_shortcut_boxes(any_box: &TextBox) {
     let _ = any_box;
     for action in Action::all() {
         if let Ok(text_box) = find::<TextBox>(&window.root, &control_name("S", &action.name())) {
-            let text = map.shortcut_for(action).map(|chord| chord.to_string()).unwrap_or_default();
+            let text = effective_shortcut_text(&map, &settings_store::current(), action);
             let _ = text_box.SetText(&HSTRING::from(text));
         }
     }

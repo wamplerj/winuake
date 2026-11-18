@@ -27,6 +27,8 @@ pub enum ChordKey {
     ParenRight,
     Asterisk,
     Comma,
+    /// The key left of `1` on a US layout (`VK_OEM_3`), Quake's console key.
+    Backtick,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,6 +70,7 @@ const VK_LETTER_A: i32 = 0x41;
 const VK_LETTER_Z: i32 = 0x5A;
 const VK_NUMPAD_MULTIPLY: i32 = 0x6A;
 const VK_OEM_COMMA: i32 = 0xBC;
+const VK_OEM_3: i32 = 0xC0;
 const VK_F1: i32 = 0x70;
 const VK_F24: i32 = 0x87;
 
@@ -87,6 +90,7 @@ impl Chord {
             VK_DOWN => ChordKey::Down,
             VK_NUMPAD_MULTIPLY => ChordKey::Asterisk,
             VK_OEM_COMMA => ChordKey::Comma,
+            VK_OEM_3 => ChordKey::Backtick,
             VK_LETTER_A..=VK_LETTER_Z => ChordKey::Letter(char::from(virtual_key as u8)),
             VK_DIGIT_0..=VK_DIGIT_9 => ChordKey::Digit((virtual_key - VK_DIGIT_0) as u8),
             VK_F1..=VK_F24 => ChordKey::Function((virtual_key - VK_F1 + 1) as u8),
@@ -116,6 +120,7 @@ impl Chord {
             ChordKey::ParenRight => (VK_DIGIT_0, true),
             ChordKey::Asterisk => (VK_DIGIT_0 + 8, true),
             ChordKey::Comma => (VK_OEM_COMMA, false),
+            ChordKey::Backtick => (VK_OEM_3, false),
         };
         HotkeySpec {
             control: self.modifiers.control,
@@ -156,6 +161,7 @@ impl Chord {
             ")" => return Some(ChordKey::ParenRight),
             "*" => return Some(ChordKey::Asterisk),
             "," => return Some(ChordKey::Comma),
+            "`" => return Some(ChordKey::Backtick),
             _ => {}
         }
         if let Some(number) = lower.strip_prefix('f').and_then(|digits| digits.parse::<u8>().ok()) {
@@ -195,6 +201,7 @@ impl fmt::Display for Chord {
             ChordKey::ParenRight => formatter.write_str(")"),
             ChordKey::Asterisk => formatter.write_str("*"),
             ChordKey::Comma => formatter.write_str(","),
+            ChordKey::Backtick => formatter.write_str("`"),
         }
     }
 }
@@ -204,6 +211,7 @@ mod tests {
     use super::*;
 
     const CTRL: ChordModifiers = ChordModifiers { control: true, shift: false, alt: false };
+    const CTRL_ONLY: ChordModifiers = ChordModifiers { control: true, shift: false, alt: false };
     const CTRL_SHIFT: ChordModifiers = ChordModifiers { control: true, shift: true, alt: false };
 
     #[test]
@@ -240,6 +248,7 @@ mod tests {
             "Alt+0",
             "F1",
             "Ctrl+Shift+,",
+            "Ctrl+`",
         ] {
             let chord = Chord::parse(text).expect(text);
             assert_eq!(chord.to_string(), text);
@@ -270,6 +279,14 @@ mod tests {
         assert_eq!(chord, Chord::new(true, true, false, ChordKey::Comma));
         let hotkey = chord.hotkey();
         assert_eq!((hotkey.virtual_key, hotkey.control, hotkey.shift, hotkey.alt), (0xBC, true, true, false));
+    }
+
+    #[test]
+    fn given_the_backtick_key_when_converting_then_the_hotkey_uses_the_oem_3_code() {
+        let chord = Chord::from_virtual_key(0xC0, CTRL_ONLY).expect("backtick");
+        assert_eq!(chord, Chord::parse("Ctrl+`").unwrap());
+        let hotkey = chord.hotkey();
+        assert_eq!((hotkey.virtual_key, hotkey.control, hotkey.shift, hotkey.alt), (0xC0, true, false, false));
     }
 
     #[test]

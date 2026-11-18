@@ -4,7 +4,7 @@
 
 use crate::window_bindings::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos,
-    GetModuleHandleW, HINSTANCE, HWND, HWND_MESSAGE, IDI_APPLICATION, LPARAM, LRESULT, LoadIconW, MF_SEPARATOR,
+    GetModuleHandleW, HICON, HINSTANCE, HWND, HWND_MESSAGE, IDI_APPLICATION, LPARAM, LRESULT, LoadIconW, MF_SEPARATOR,
     MF_STRING, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, POINT, PostMessageW,
     RegisterClassExW, RegisterWindowMessageW, SetForegroundWindow, Shell_NotifyIconW, TPM_BOTTOMALIGN, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP, WM_LBUTTONUP, WM_RBUTTONUP, WM_USER, WNDCLASSEXW, WPARAM,
@@ -100,13 +100,22 @@ fn icon_data(window: HWND) -> NOTIFYICONDATAW {
         uID: TRAY_ICON_ID,
         uFlags: (NIF_MESSAGE | NIF_ICON | NIF_TIP) as u32,
         uCallbackMessage: WM_TRAY_CALLBACK,
-        hIcon: unsafe { LoadIconW(None, IDI_APPLICATION) },
+        hIcon: application_icon(),
         ..NOTIFYICONDATAW::default()
     };
     for (slot, unit) in data.szTip.iter_mut().zip("Winuake".encode_utf16().chain(std::iter::once(0))) {
         *slot = unit;
     }
     data
+}
+
+/// The icon the build embeds in the executable (resource 1); the stock application icon only if that is missing.
+fn application_icon() -> HICON {
+    unsafe {
+        let instance: HINSTANCE = GetModuleHandleW(PCWSTR::null());
+        let embedded = LoadIconW(Some(instance), PCWSTR(1 as *const u16));
+        if embedded.0.is_null() { LoadIconW(None, IDI_APPLICATION) } else { embedded }
+    }
 }
 
 fn add_icon() {
