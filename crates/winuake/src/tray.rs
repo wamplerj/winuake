@@ -113,7 +113,7 @@ fn icon_data(window: HWND) -> NOTIFYICONDATAW {
 fn application_icon() -> HICON {
     unsafe {
         let instance: HINSTANCE = GetModuleHandleW(PCWSTR::null());
-        let embedded = LoadIconW(Some(instance), PCWSTR(1 as *const u16));
+        let embedded = LoadIconW(Some(instance), PCWSTR(std::ptr::without_provenance::<u16>(1)));
         if embedded.0.is_null() { LoadIconW(None, IDI_APPLICATION) } else { embedded }
     }
 }
